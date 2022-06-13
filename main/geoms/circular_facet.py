@@ -1,7 +1,7 @@
 import math
 import numpy as np
-from geoms import getArea, getDistance, lerp, getPolyLineArea, getPolyLineIntersects, getCentroid, pointInPoly, pointRightOfLine, pointLeftOfLine
-from linear_facet import getLinearFacet, getLinearFacetFromNormal
+from main.geoms.geoms import getArea, getDistance, lerp, getPolyLineArea, getPolyLineIntersects, getCentroid, pointInPoly, pointRightOfLine, pointLeftOfLine
+from main.geoms.linear_facet import getLinearFacet, getLinearFacetFromNormal
 from scipy.optimize import minimize, root, newton
 
 #True if major arc

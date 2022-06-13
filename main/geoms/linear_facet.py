@@ -1,5 +1,5 @@
 import math
-from geoms import getArea, getCentroid, getDistance, lerp, getPolyLineArea, getPolyLineIntersects
+from main.geoms.geoms import getArea, getCentroid, getDistance, lerp, getPolyLineArea, getPolyLineIntersects
 
 #Newton's method
 #Assumes centroids are different

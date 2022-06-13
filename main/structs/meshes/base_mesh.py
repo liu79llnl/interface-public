@@ -32,14 +32,14 @@ class BaseMesh:
                 if points[x][y][1] < self._min_y:
                     self._min_y = points[x][y][1]
 
-        self.polys = [[None] * (len(points[0])-1) for _ in range(len(points)-1)]
+        self.polys: List[List[BasePolygon]] = [[None] * (len(points[0])-1) for _ in range(len(points)-1)]
         self._plt_patches = []
         for x in range(len(self.polys)):
             for y in range(len(self.polys[0])):
                 #Make quads
                 poly = BasePolygon([points[x][y], points[x+1][y], points[x+1][y+1], points[x][y+1]])
                 self.polys[x][y] = poly
-                patch = plt_polygon(np.array(poly), True)
+                patch = plt_polygon(np.array(poly.points), True)
                 self._plt_patches.append(patch)
         
         if fractions is None:
@@ -68,7 +68,7 @@ class BaseMesh:
         #Flatten array
         for x in range(len(self.polys)):
             for y in range(len(self.polys[0])):
-                self.polys.setFraction(fractions[x][y]) #TODO double-check here
+                self.polys[x][y].setFraction(fractions[x][y]) #TODO double-check here
                 a = fractions[x][y]
                 patchareas.append(a)
                 patchpartialareas.append(math.ceil(a - math.floor(a)))

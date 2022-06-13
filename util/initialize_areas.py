@@ -1,29 +1,24 @@
 import math
-from geoms import getDistance, getArea, mergePolys, getPolyIntersectArea, getPolyLineArea, getPolyLineIntersects, lineIntersect, getCentroid
-from linear_facet import getLinearFacet
-from circular_facet import getCircleIntersectArea, getCircleCircleIntersects, getArcFacet, getArcFacetNewton, getCircleLineIntersects2, getCenter
-from corner_facet import getPolyCornerArea, getPolyCurvedCornerArea, getCurvedCornerFacet
+from main.geoms.geoms import getDistance, getArea, mergePolys, getPolyIntersectArea, getPolyLineArea, getPolyLineIntersects, lineIntersect, getCentroid
+from main.geoms.linear_facet import getLinearFacet
+from main.geoms.circular_facet import getCircleIntersectArea, getCircleCircleIntersects, getArcFacet, getArcFacetNewton, getCircleLineIntersects2, getCenter
+from main.geoms.corner_facet import getPolyCornerArea, getPolyCurvedCornerArea, getCurvedCornerFacet
 import numpy as np
 from scipy.integrate import dblquad
 
-def initializeCircle(opolys, center, radius, threshold):
-    areas = [[0] * len(opolys[0]) for _ in range(len(opolys))]
+from main.structs.polys.base_polygon import BasePolygon
+from main.structs.meshes.base_mesh import BaseMesh
 
-    for x in range(len(opolys)):
-        for y in range(len(opolys[0])):
-            opoly = opolys[x][y]
-            intersectarea, _ = getCircleIntersectArea(center, radius, opoly)
-            areas[x][y] = intersectarea
-            areas[x][y] /= getArea(opoly)
+#m = BaseMesh, return areas array
+def initializeCircle(m: BaseMesh, center, radius, threshold):
+    areas = [[0] * len(m.polys[0]) for _ in range(len(m.polys))]
 
-            if areas[x][y] > 1:
-                areas[x][y] = 1
-            if abs(1-areas[x][y]) < threshold:
-                areas[x][y] = 1
-            elif abs(areas[x][y]) < threshold:
-                areas[x][y] = 0
-            elif areas[x][y] < 0:
-                areas[x][y] = 0
+    for x in range(len(m.polys)):
+        for y in range(len(m.polys[0])):
+            poly: BasePolygon = m.polys[x][y]
+            intersectarea, _ = getCircleIntersectArea(center, radius, poly.points)
+
+            areas[x][y] = intersectarea/poly.getMaxArea()
 
     return areas
 

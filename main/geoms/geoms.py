@@ -247,6 +247,12 @@ def getPolyIntersectArea(poly1, poly2):
 #Only compares vertices of neighboring mesh polygons
 def mergePolys(poly1, poly2):
     #No duplicates
+    
+    if poly1 == []:
+        return poly2
+    if poly2 == []:
+        return poly1
+
     newpoly = []
     for i in range(len(poly1)):
         vertex1 = poly1[i]

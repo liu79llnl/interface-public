@@ -13,6 +13,7 @@ class BasePolygon:
         #Error less than this is acceptable
         self.fraction_tolerance = 1e-10
 
+    #TODO set fraction to 0 or 1 if within threshold?
     def setArea(self, area):
         self.fraction = area/self.max_area
         if self.fraction < 0 or self.fraction > 1:
@@ -38,6 +39,9 @@ class BasePolygon:
     def getFractionTolerance(self):
         return self.fraction_tolerance
 
+    def getMaxArea(self):
+        return self.max_area
+
     def isFull(self):
         return self.fraction > 1-self.fraction_tolerance
 
@@ -45,7 +49,7 @@ class BasePolygon:
         return self.fraction < self.fraction_tolerance
 
     def isMixed(self):
-        return not(self.isFull or self.isEmpty)
+        return not(self.isFull() or self.isEmpty())
 
     def setFacet(self, facet):
         self.facet = facet

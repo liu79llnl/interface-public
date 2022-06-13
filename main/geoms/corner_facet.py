@@ -1,7 +1,7 @@
 import numpy as np
 import math
-from geoms import getArea, lerp, getPolyLineArea, getPolyIntersectArea, getDistance
-from circular_facet import getCircleIntersectArea, getCenter
+from main.geoms.geoms import getArea, lerp, getPolyLineArea, getPolyIntersectArea, getDistance
+from main.geoms.circular_facet import getCircleIntersectArea, getCenter
 
 #Returns area to left of corner facet1, corner, facet2
 #TODO: more consistent way of computing polygon-corner intersection than extending corner? For example, test for polygon-line intersects.
