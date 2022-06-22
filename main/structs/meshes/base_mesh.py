@@ -1,6 +1,7 @@
 import numpy as np
 import math
 import vtk
+import os
 import matplotlib.pyplot as plt
 from matplotlib.patches import Polygon as plt_polygon
 from matplotlib.collections import PatchCollection
@@ -10,9 +11,10 @@ from main.structs.polys.base_polygon import BasePolygon
 class BaseMesh:
 
     #Parameters that can be accessed publicly: self.polys
-    def __init__(self, points, fractions=None):
+    def __init__(self, points, threshold, fractions=None):
         #Points = [[x, y]]
         self._points = points
+        self.threshold = threshold
 
         #Compute extremes x and y
         self._max_x = -float('inf')
@@ -32,7 +34,7 @@ class BaseMesh:
                 if points[x][y][1] < self._min_y:
                     self._min_y = points[x][y][1]
 
-        self.polys: List[List[BasePolygon]] = [[None] * (len(points[0])-1) for _ in range(len(points)-1)]
+        self.polys: list[list[BasePolygon]] = [[None] * (len(points[0])-1) for _ in range(len(points)-1)]
         self._plt_patches = []
         for x in range(len(self.polys)):
             for y in range(len(self.polys[0])):
@@ -55,12 +57,18 @@ class BaseMesh:
         #Flatten array
         for x in range(len(self.polys)):
             for y in range(len(self.polys[0])):
-                patchinitialareas.append(fractions[x][y])
+
+                adjusted_fraction = fractions[x][y]
+                if abs(1-adjusted_fraction) < self.threshold:
+                    adjusted_fraction = 1
+                elif abs(adjusted_fraction) < self.threshold:
+                    adjusted_fraction = 0
+
+                patchinitialareas.append(adjusted_fraction)
 
         self._plt_patchinitialareas = np.array(patchinitialareas)
         self.setFractions(fractions)
 
-    #TODO: make sure these are actually areas and not fractions
     def setFractions(self, fractions):
         patchareas = []
         patchpartialareas = []
@@ -68,16 +76,26 @@ class BaseMesh:
         #Flatten array
         for x in range(len(self.polys)):
             for y in range(len(self.polys[0])):
-                self.polys[x][y].setFraction(fractions[x][y]) #TODO double-check here
-                a = fractions[x][y]
-                patchareas.append(a)
-                patchpartialareas.append(math.ceil(a - math.floor(a)))
+                
+                adjusted_fraction = fractions[x][y]
+                if abs(1-adjusted_fraction) < self.threshold:
+                    adjusted_fraction = 1
+                elif abs(adjusted_fraction) < self.threshold:
+                    adjusted_fraction = 0
+
+                self.polys[x][y].setFraction(adjusted_fraction)
+                patchareas.append(adjusted_fraction)
+                patchpartialareas.append(math.ceil(adjusted_fraction - math.floor(adjusted_fraction)))
 
         self._plt_patchareas = np.array(patchareas)
         self._plt_patchpartialareas = np.array(patchpartialareas)
 
     #Plot mesh and areas as plt images
     def plotPolyValues(self, values, path):
+        base_path = '/'.join(path.split('/')[:-1])
+        if not os.path.exists(base_path):
+            os.makedirs(base_path, exist_ok=True)
+
         patchcollection = PatchCollection(self._plt_patches, cmap='plasma') #jet
         patchcollection.set_array(values)
         fig, ax = plt.subplots()
@@ -99,7 +117,11 @@ class BaseMesh:
         self.plotPolyValues(self._plt_patchareas - self._plt_patchinitialareas, path)
 
     #Plot mesh as vtk file
-    def plotMesh(self, path):
+    def writeMesh(self, path):
+        base_path = '/'.join(path.split('/')[:-1])
+        if not os.path.exists(base_path):
+            os.makedirs(base_path, exist_ok=True)
+            
         sgrid = vtk.vtkStructuredGrid()
         sgrid.SetDimensions([len(self._points), len(self._points[0]), 1])
         vtkpoints = vtk.vtkPoints()

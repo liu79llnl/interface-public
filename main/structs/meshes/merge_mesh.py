@@ -1,14 +1,16 @@
 from main.structs.meshes.base_mesh import BaseMesh
 from main.structs.polys.base_polygon import BasePolygon
 from main.structs.polys.neighbored_polygon import NeighboredPolygon
-from main.geoms.geoms import mergePolys
+from main.geoms.geoms import mergePolys, getPolyIntersectArea, getArea, getPolyLineArea
+from main.geoms.circular_facet import getCircleIntersectArea
+from main.structs.facets.base_facet import advectPoint
 
 from functools import reduce
 
 class MergeMesh(BaseMesh):
 
-    def __init__(self, points, areas=None):
-        super().__init__(points, areas)
+    def __init__(self, points, threshold, areas=None):
+        super().__init__(points, threshold, areas)
 
         # List of merged polys, index in list is used as id.
         # Each element is a list of (x, y)s corresponding to the Cartesian coordinates of the polys to be merged.
@@ -73,6 +75,13 @@ class MergeMesh(BaseMesh):
                 return False
             return self.polys[x][y].isMixed()
 
+        #Set global values to initials
+        self.merge_ids_to_coords = []
+        self.merge_id_to_neighbor_ids = []
+        self.next_merge_id = 0
+        self.coords_to_merge_id = [[None for _ in range(len(self.polys[0]))] for _ in range(len(self.polys))]
+        self.merged_polys = dict()
+
         # Set each individual poly to its own merge id
         for x in range(len(self.polys)):
             for y in range(len(self.polys[0])):
@@ -123,6 +132,7 @@ class MergeMesh(BaseMesh):
 
     # Resets self.merged_polys according to the latest values in self.merge_ids_to_coords
     def createMergedPolys(self):
+        #Set global variables to initials
         self.merged_polys = dict()
 
         # Add all merge ids in use to the queue
@@ -135,6 +145,90 @@ class MergeMesh(BaseMesh):
                     self.merged_polys[merge_id] = NeighboredPolygon(merge_points)
                     total_area = sum(list(map(lambda x : self.polys[x[0]][x[1]].getArea(), merge_coords)))
                     self.merged_polys[merge_id].setArea(total_area)
+
+    def advectMergedFacets(self, velocity, t, dt, checkSize=2):
+
+        advected_areas = [[0] * len(self.polys[0]) for _ in range(len(self.polys))]
+        advected_facets = []
+        #List to keep track of merge ids such that advected facet has been appended
+        processed_merge_ids = []
+
+        #Advect interface and intersect with neighbors
+        for advectx in range(len(self.polys)):
+            for advecty in range(len(self.polys[0])):
+                if self.polys[advectx][advecty].getFraction() > self.threshold:
+                    #shiftpoly
+                    shiftpoly = list(map(lambda x : advectPoint(x, velocity, t, dt), self.polys[advectx][advecty].points))
+                    shiftbounds = [min(list(map(lambda x : x[0], shiftpoly))), min(list(map(lambda x : x[1], shiftpoly))), max(list(map(lambda x : x[0], shiftpoly))), max(list(map(lambda x : x[1], shiftpoly)))]
+
+                    for testx in range(-checkSize, checkSize+1):
+                        for testy in range(-checkSize, checkSize+1):
+                            checkx = advectx-testx
+                            checky = advecty-testy
+                            if checkx >= 0 and checkx < len(self.polys) and checky >= 0 and checky < len(self.polys[0]):
+                                testpoly = self.polys[checkx][checky].points
+                                testbounds = [min(list(map(lambda x : x[0], testpoly))), min(list(map(lambda x : x[1], testpoly))), max(list(map(lambda x : x[0], testpoly))), max(list(map(lambda x : x[1], testpoly)))]
+                                if not(testbounds[2] <= shiftbounds[0] or shiftbounds[2] <= testbounds[0] or testbounds[3] <= shiftbounds[1] or shiftbounds[3] <= testbounds[1]):
+                                    #bounding boxes intersect, could be nonzero intersection
+                                    #TODO is this part still necessary?
+                                    try:
+                                        polyintersections = getPolyIntersectArea(shiftpoly, testpoly)
+                                    except:
+                                        print("Failed polyintersect: getPolyIntersectArea({}, {})".format(shiftpoly, testpoly))
+                                        testpoly = list(map(lambda x : [x[0]+1e-13, x[1]+1e-13], testpoly))
+                                        polyintersections = getPolyIntersectArea(shiftpoly, testpoly)
+                                    if len(polyintersections) == 0:
+                                        #No intersection
+                                        continue
+                                    #For each overlap region
+                                    for polyintersection in polyintersections:
+                                        advect_merge_id = self._get_merge_id(advectx, advecty)
+                                        if advect_merge_id is None:
+                                            #Full cell
+                                            #TODO is this necessary?
+                                            assert self.polys[advectx][advecty].getArea() > 1-self.threshold
+                                            advected_areas[checkx][checky] += abs(getArea(polyintersection))
+                                        else:
+                                            #Mixed cell with facet
+                                            advectedfacet = self.merged_polys[advect_merge_id].getFacet()
+
+                                            #Linear or arc
+                                            advectedfacet = advectedfacet.advected(velocity, t, dt)
+                                            #Add to return
+                                            if advect_merge_id not in processed_merge_ids:
+                                                processed_merge_ids.append(advect_merge_id)
+                                                advected_facets.append(advectedfacet)
+                                            if advectedfacet.name == 'linear':
+                                                polyintersectionarea = getPolyLineArea(polyintersection, advectedfacet.pLeft, advectedfacet.pRight)
+                                            elif advectedfacet.name == 'arc':
+                                                polyintersectionarea, _ = getCircleIntersectArea(advectedfacet.center, advectedfacet.radius, polyintersection)
+                                            advected_areas[checkx][checky] += polyintersectionarea #TODO: abs here?
+                                            #TODO necessary?
+                                            if polyintersectionarea < 0:
+                                                print("Negative polyintersectionarea")
+
+                                            #TODO handle corner case here
+                                            """
+                                                elif len(predfacets[advectx][advecty]) == 2:
+                                                    #Corner
+                                                    advectedfacet1 = predfacets[advectx][advecty][0].advected(velocity, t, dt)
+                                                    advectedfacet1r = advectedfacet1.radius if advectedfacet1.name == 'arc' else None
+                                                    plot_advectedfacets.append(advectedfacet1)
+                                                    advectedfacet2 = predfacets[advectx][advecty][1].advected(velocity, t, dt)
+                                                    advectedfacet2r = advectedfacet2.radius if advectedfacet2.name == 'arc' else None
+                                                    plot_advectedfacets.append(advectedfacet2)
+                                                    nareas[checkx][checky] += getPolyCurvedCornerArea(polyintersection, advectedfacet1.pLeft, advectedfacet1.pRight, advectedfacet2.pRight, advectedfacet1r, advectedfacet2r)
+                                                else:
+                                                    print("More than two facets in this cell?")
+                                            """
+                                            
+        #Update areas
+        for x in range(len(self.polys)):
+            for y in range(len(self.polys[0])):
+                advected_areas[x][y] = min(max(advected_areas[x][y]/self.polys[x][y].getMaxArea(), 0), 1)
+
+        self.setFractions(advected_areas)
+        return advected_facets
             
     #TODO: figure out how to load algo by name
     """
@@ -146,6 +240,8 @@ class MergeMesh(BaseMesh):
     3. For polys with 3+ neighbors, check if potential neighbors already have two neighbors set. If so, remove as potential neighbor. Readd to queue.
 
     Unclear if this will run into issues, especially when the interface exits the same edge twice.
+
+    Returns poly objects
     """
     def findOrientations(self):
         
@@ -355,14 +451,11 @@ class MergeMesh(BaseMesh):
         self.createMergedPolys()
 
         for merge_id in merge_id_to_obj.keys():
-            self.merged_polys[merge_id].setNeighbor(self.merged_polys[merge_id_to_obj[merge_id].get_left()], "left")
-            self.merged_polys[merge_id].setNeighbor(self.merged_polys[merge_id_to_obj[merge_id].get_right()], "right")
-            
+            merged_poly: NeighboredPolygon = self.merged_polys[merge_id]
+            merged_poly.setNeighbor(self.merged_polys[merge_id_to_obj[merge_id].get_left()], "left")
+            merged_poly.setNeighbor(self.merged_polys[merge_id_to_obj[merge_id].get_right()], "right")
+            merged_poly.setCircularFacet()
+
         return list(map(lambda x : self.merged_polys[x], merge_id_to_obj.keys()))
 
-        
-                    # print(self._get_merge_coords(merge_id))
-                    # for neighbor_id in merge_id_with_neighbors.get_neighbor_ids():
-                    #     print(self._get_merge_coords(neighbor_id))
-                    # print(self._get_merge_coords(merge_id_with_neighbors.get_left()))
-                    # print(self._get_merge_coords(merge_id_with_neighbors.get_right()))
+#TODO return polys instead and write different functions for only linear vs. only circular vs. corners?
