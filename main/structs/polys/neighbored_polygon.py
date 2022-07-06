@@ -1,8 +1,8 @@
 from main.structs.polys.base_polygon import BasePolygon
-
+from main.geoms.geoms import getDistance
 from main.structs.facets.base_facet import LinearFacet, ArcFacet
 from main.geoms.circular_facet import getArcFacet
-from main.geoms.linear_facet import getLinearFacet, getPolyLineArea, getPolyLineIntersects
+from main.geoms.linear_facet import getLinearFacet, getPolyLineArea, getPolyLineIntersects, getLinearFacetFromNormal
 
 class NeighboredPolygon(BasePolygon):
 
@@ -50,13 +50,25 @@ class NeighboredPolygon(BasePolygon):
                 intersects = getPolyLineIntersects(self.points, facetline1, facetline2)
                 self.setFacet(LinearFacet(intersects[0], intersects[-1]))
             else:
-                arccenter, arcradius, arcintersects = getArcFacet(self.left_neighbor.points, self.points, self.right_neighbor.points, self.left_neighbor.getFraction(), self.getFraction(), self.right_neighbor.getFraction(), threshold)
-                #TODO If failed: default to linear
-                if arccenter is None or arcradius is None or arcintersects is None:
+                try:
+                    arccenter, arcradius, arcintersects = getArcFacet(self.left_neighbor.points, self.points, self.right_neighbor.points, self.left_neighbor.getFraction(), self.getFraction(), self.right_neighbor.getFraction(), threshold)
+                    #TODO If failed: default to linear
+                    if arccenter is None or arcradius is None or arcintersects is None:
+                        l1 = facetline1
+                        l2 = facetline2
+                        normal = [(-l2[1]+l1[1])/getDistance(l1, l2), (l2[0]-l1[0])/getDistance(l1, l2)]
+                        facetline1, facetline2 = getLinearFacetFromNormal(self.points, self.getFraction(), normal, threshold)
+                        intersects = getPolyLineIntersects(self.points, facetline1, facetline2)
+                        self.setFacet(LinearFacet(intersects[0], intersects[-1]))
+                    else:
+                        self.setFacet(ArcFacet(arccenter, arcradius, arcintersects[0], arcintersects[-1]))
+                except:
+                    l1 = facetline1
+                    l2 = facetline2
+                    normal = [(-l2[1]+l1[1])/getDistance(l1, l2), (l2[0]-l1[0])/getDistance(l1, l2)]
+                    facetline1, facetline2 = getLinearFacetFromNormal(self.points, self.getFraction(), normal, threshold)
                     intersects = getPolyLineIntersects(self.points, facetline1, facetline2)
                     self.setFacet(LinearFacet(intersects[0], intersects[-1]))
-                else:
-                    self.setFacet(ArcFacet(arccenter, arcradius, arcintersects[0], arcintersects[-1]))
         else:
             print("Failed to make facet")
 

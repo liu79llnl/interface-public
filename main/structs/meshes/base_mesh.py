@@ -5,6 +5,7 @@ import os
 import matplotlib.pyplot as plt
 from matplotlib.patches import Polygon as plt_polygon
 from matplotlib.collections import PatchCollection
+import pickle
 
 from main.structs.polys.base_polygon import BasePolygon
 
@@ -90,6 +91,14 @@ class BaseMesh:
         self._plt_patchareas = np.array(patchareas)
         self._plt_patchpartialareas = np.array(patchpartialareas)
 
+    def writeToPickle(self, path):
+        base_path = '/'.join(path.split('/')[:-1])
+        if not os.path.exists(base_path):
+            os.makedirs(base_path, exist_ok=True)
+
+        f = open(path, "wb")
+        pickle.dump(self, f)
+
     #Plot mesh and areas as plt images
     def plotPolyValues(self, values, path):
         base_path = '/'.join(path.split('/')[:-1])
@@ -121,7 +130,7 @@ class BaseMesh:
         base_path = '/'.join(path.split('/')[:-1])
         if not os.path.exists(base_path):
             os.makedirs(base_path, exist_ok=True)
-            
+
         sgrid = vtk.vtkStructuredGrid()
         sgrid.SetDimensions([len(self._points), len(self._points[0]), 1])
         vtkpoints = vtk.vtkPoints()

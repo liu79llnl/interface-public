@@ -5,17 +5,19 @@ from util.init_points import makeFineCartesianGrid
 from util.initialize_areas import initializeCircle, initializePoly, zalesak, xpluso
 from util.write_facets import writeFacets
 
+import pickle
+
 #Settings
 
 #Mesh settings
 grid_size = 100
-resolution = 1
+resolution = 32/100
 
 #Test settings
 test_type = "vortex"
 
 #Area and facet settings
-threshold = 1e-8
+threshold = 1e-10
 
 #Advection settings
 dt = 0.01
@@ -63,9 +65,12 @@ writeFacets(reconstructed_facets, 'plots/vtk/reconstructed/initial.vtp')
 
 #Advection
 t = 0
-num_iters = 5#int(total_t/dt)+5
-
+num_iters = int(total_t/dt)+5
+# pickle_f = open('plots/temp.pickle', 'rb')
+# m = pickle.load(pickle_f)
 for iter in range(num_iters):
+    # if iter < 141:
+    #     continue
     print("t = {}".format(t))
 
     #Advect facets and compute new areas
@@ -81,5 +86,7 @@ for iter in range(num_iters):
     merged_polys = m.findOrientations()
     reconstructed_facets = [p.getFacet() for p in merged_polys]
     writeFacets(reconstructed_facets, 'plots/vtk/reconstructed/{}.vtp'.format(iter))
+    
+    m.writeToPickle('plots/temp.pickle')
 
     t += dt
