@@ -272,6 +272,7 @@ def getLinearFacet2(poly1, poly2, a1, a2, epsilon):
 
 #normal = [x_component, y_component]
 def getLinearFacetFromNormal(poly, a, normal, epsilon):
+    max_newton_iters = 50
     #print('getLinearFacetFromNormal({}, {}, {}, {})'.format(poly, a, normal, epsilon))
     assert a >= 0 and a <= 1, "Given areas for getLinearFacetFromNormal are not valid"
     a *= getArea(poly)
@@ -309,8 +310,10 @@ def getLinearFacetFromNormal(poly, a, normal, epsilon):
 
     converged = abs(cura-a) < epsilon
     
+    # Try Newton's first (can sometimes fail)
+    # getLinearFacetFromNormal([[45.3125, 45.3125], [46.09375, 45.3125], [46.09375, 46.09375], [45.3125, 46.09375]], 0.999999828140065, [-0.7071067811210403, -0.7071067812520546], 1e-10)
     counter = 0
-    while not(converged):
+    while not(converged) and counter < max_newton_iters:
         #Update t
         if dadt != 0 and t-((cura-a)/dadt) > 0 and t-((cura-a)/dadt) < 1:
             t -= (cura-a)/dadt
@@ -320,9 +323,6 @@ def getLinearFacetFromNormal(poly, a, normal, epsilon):
             else:
                 t = t/2
         
-        #    print("Failed to converge: getLinearFacetFromNormal({}, {}, {}, {})".format(poly, a, normal, epsilon))
-        #    print(1/0)
-        
         #Compute new area
         l1 = lerp(vertex_up, vertex_down, t)
         l2 = [l1[0]+tangent[0], l1[1]+tangent[1]]
@@ -331,26 +331,42 @@ def getLinearFacetFromNormal(poly, a, normal, epsilon):
 
         cura = getPolyLineArea(poly, l1, l2)
 
-        """
-        polylineintersects = getPolyLineIntersects(poly, l1, l2)
-        assert len(polylineintersects) % 2 == 0
-        dadt1 = 0
-        for i in range(len(polylineintersects)//2):
-            dadt1 += getDistance(polylineintersects[2*i], polylineintersects[2*i+1])
-        """
-
         curaplusdt = getPolyLineArea(poly, l1plusdt, l2plusdt)
         dadt = (curaplusdt-cura)/dtbase
 
-        #print("a: {}, cura: {}".format(a, cura))
-        #print("t: {}".format(t))
         converged = abs(cura-a) < epsilon
-        #if t < 1e-8:
-        #    print("Failed to converge: getLinearFacetFromNormal({}, {}, {}, {})".format(poly, a, normal, epsilon))
-        #    print(1/0)
         counter += 1
 
-    #print(counter)
+    t = 0.5
+    tgap = 0.25
+    l1 = lerp(vertex_up, vertex_down, t)
+    l2 = [l1[0]+tangent[0], l1[1]+tangent[1]]
+    l1plusdt = lerp(vertex_up, vertex_down, t+dtbase)
+    l2plusdt = [l1plusdt[0]+tangent[0], l1plusdt[1]+tangent[1]]
+
+    cura = getPolyLineArea(poly, l1, l2)
+    converged = abs(cura-a) < epsilon
+
+    # Bisection method (hopefully consistent)
+    counter = 0
+    while not(converged):
+        if cura < a:
+            t += tgap
+        else:
+            t -= tgap
+        tgap /= 2
+
+        #Compute new area
+        l1 = lerp(vertex_up, vertex_down, t)
+        l2 = [l1[0]+tangent[0], l1[1]+tangent[1]]
+        l1plusdt = lerp(vertex_up, vertex_down, t+dtbase)
+        l2plusdt = [l1plusdt[0]+tangent[0], l1plusdt[1]+tangent[1]]
+
+        cura = getPolyLineArea(poly, l1, l2)
+
+        converged = abs(cura-a) < epsilon
+        counter += 1
+
     #Final linear facet: find correct endpoints
     intersects = getPolyLineIntersects(poly, l1, l2)
     return intersects[0], intersects[-1]

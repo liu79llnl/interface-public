@@ -1,0 +1,16 @@
+TEST:
+  FROM_TEMP: false
+  SAVE_NAME: zalesak_32
+  SETTING: zalesak
+
+MESH:
+  GRID_SIZE: 100
+  RESOLUTION: 0.32
+
+GEOMS:
+  FACET_ALGO: circular
+  THRESHOLD: 1.0e-10
+
+ADVECTION:
+  DT: 0.01
+  T_TOTAL: 2

@@ -6,7 +6,7 @@ from main.geoms.geoms import mergePolys, getPolyIntersectArea, getArea, getPolyL
 from main.geoms.circular_facet import getCircleIntersectArea
 from main.structs.facets.base_facet import advectPoint
 
-from functools import reduce
+from typing import Dict
 
 class MergeMesh(BaseMesh):
 
@@ -53,6 +53,7 @@ class MergeMesh(BaseMesh):
         for merge_id in merge_ids:
             merge_coords += self._get_merge_coords(merge_id)
             some_neighbor_ids = self._get_neighbor_ids_from_merge_id(merge_id)
+            # For each neighbor
             for neighbor_id in some_neighbor_ids:
                 if neighbor_id not in merge_ids:
                     neighbor_ids.add(neighbor_id)
@@ -106,6 +107,45 @@ class MergeMesh(BaseMesh):
                             neighbor_id = self._get_merge_id(neighbor_coords[0], neighbor_coords[1])
                             self.merge_id_to_neighbor_ids[merge_id].append(neighbor_id)
 
+    # Take cell and return 3x3 array of area fractions (for Young's)
+    def get3x3Stencil(self, x, y):
+        def _helper_in_bounds(i, j):
+            if i < 0 or j < 0 or i >= len(self.polys) or j >= len(self.polys[0]):
+                return 0
+            return self.polys[i][j].getFraction()
+
+        ret = [[0,0,0],[0,0,0],[0,0,0]]
+        for x_delta in range(-1, 2):
+            for y_delta in range(-1, 2):
+                ret[1+x_delta][1+y_delta] = _helper_in_bounds(x+x_delta, y+y_delta)
+
+        return ret
+
+    # Get full/empty cell coords whose fraction is closest to being mixed
+    # If all are mixed, returns [None, None]
+    def getMostMixedAdjacentFullCell(self, x, y):
+        def _helper_diffs(i, j):
+            # Ignore mixed cells
+            if i < 0 or j < 0 or i >= len(self.polys) or j >= len(self.polys[0]) or self.polys[i][j].isMixed():
+                return float("inf")
+            return self.polys[i][j].diffFromMixed()
+        
+        dirs = [[1, 0], [0, 1], [-1, 0], [0, -1]]
+
+        ret_x = None
+        ret_y = None
+        min_diff = float("inf")
+        for dir in dirs:
+            diff = _helper_diffs(x+dir[0], y+dir[1])
+            if diff < min_diff:
+                ret_x = x+dir[0]
+                ret_y = y+dir[1]
+
+        diffs = list(map(lambda dir : _helper_diffs(x+dir[0], y+dir[1]), dirs))
+        print(diffs)
+        return [ret_x, ret_y]
+
+
     #TODO add check for case of diagonal neighbors
     def merge1Neighbors(self):
         process_queue = []
@@ -127,13 +167,45 @@ class MergeMesh(BaseMesh):
             # By here, this poly should only have one neighbor. If not, low resolution: case of a long chain of mixed cells?
             if len(neighbor_ids) != 1 or self._get_merge_id(x, y) != merge_id: # second case is when merge_id has already been merged somehow
                 raise ValueError(f"Error in merge1Neighbors: neighbor_ids {neighbor_ids} has length != 1. Low resolution: long chain of mixed cells?")
-            # No issue, merge with its single neighbor
-            self._merge([merge_id, neighbor_ids[0]])
-            # If most recently created merge poly only has one neighbor, add to queue
-            if len(self._get_neighbor_ids_from_merge_id(self.next_merge_id-1)) == 1:
-                process_queue.append(self.next_merge_id-1)
+            # Check if neighbor only has two neighbors: if so, after merging, merged poly would again have a single neighbor, which could be a long chain of mixed cells. We want to avoid this.
+            neighbor_id = neighbor_ids[0]
+            if len(self._get_neighbor_ids_from_merge_id(neighbor_id)) < 3:
+                # Probably a long chain of mixed cells. Instead of merging with neighbor cell, find adjacent empty/full cell that's closest to being mixed and merge with that instead.
+                # For now, instead of trying to turn a full cell into a mixed cell, just skip it
+                # merge_coords = self._get_merge_coords(merge_id)
+                # # merge_coords should be shape [[x, y]]
+                # [full_x, full_y] = self.getMostMixedAdjacentFullCell(merge_coords[0][0], merge_coords[0][1])
+                # self._merge([merge_id, self._get_merge_id(full_x, full_y)])
+                pass
+            else:
+                # No issue, merge with its single neighbor
+                self._merge([merge_id, neighbor_ids[0]])
+
+    def _helper_createMergedPolys(self, merge_coords_list):
+        merge_coords = merge_coords_list.copy()
+        if len(merge_coords) == 1:
+            merge_points = self.polys[merge_coords[0][0]][merge_coords[0][1]].points
+        else:
+            merge_points = []
+            i = 0
+            while i < len(merge_coords):
+                try:
+                    merge_points = mergePolys(merge_points, self.polys[merge_coords[i][0]][merge_coords[i][1]].points)
+                    merge_coords.pop(i)
+                    i = 0
+                except:
+                    i += 1
+
+            if len(merge_coords) > 0:
+                raise ValueError(f"Error in _helper_createMergedPolys: number of polys to merge: {len(merge_coords)}")
+
+        ret_poly = NeighboredPolygon(merge_points)
+        total_area = sum(list(map(lambda x : self.polys[x[0]][x[1]].getArea(), merge_coords_list)))
+        ret_poly.setArea(total_area)
+        return ret_poly
 
     # Resets self.merged_polys according to the latest values in self.merge_ids_to_coords
+    # Coordinates only, no neighbors
     def createMergedPolys(self):
         #Set global variables to initials
         self.merged_polys = dict()
@@ -144,29 +216,7 @@ class MergeMesh(BaseMesh):
                 merge_id = self._get_merge_id(x, y)
                 if merge_id is not None and merge_id not in self.merged_polys.keys():
                     merge_coords = self._get_merge_coords(merge_id).copy()
-                    if len(merge_coords) == 1:
-                        merge_points = self.polys[merge_coords[0][0]][merge_coords[0][1]].points
-                    else:
-                        merge_points = []
-                        i = 0
-                        while i < len(merge_coords):
-                            try:
-                                merge_points = mergePolys(merge_points, self.polys[merge_coords[i][0]][merge_coords[i][1]].points)
-                                merge_coords.pop(i)
-                                i = 0
-                            except:
-                                i += 1
-                            
-                    #     merge_points = reduce(mergePolys, list(map(lambda x : self.polys[x[0]][x[1]].points, merge_coords)), [])
-                    # except:
-                    #     for x in merge_coords:
-                    #         print(self.polys[x[0]][x[1]].points)
-                        if len(merge_coords) > 0:
-                            raise ValueError(f"Error in createMergedPolys: number of polys to merge: {len(merge_coords)}")
-
-                    self.merged_polys[merge_id] = NeighboredPolygon(merge_points)
-                    total_area = sum(list(map(lambda x : self.polys[x[0]][x[1]].getArea(), self._get_merge_coords(merge_id))))
-                    self.merged_polys[merge_id].setArea(total_area)
+                    self.merged_polys[merge_id] = self._helper_createMergedPolys(merge_coords)
 
     def advectMergedFacets(self, velocity, t, dt, checkSize=2):
 
@@ -208,7 +258,13 @@ class MergeMesh(BaseMesh):
                                         if advect_merge_id is None:
                                             #Full cell
                                             #TODO is this necessary?
-                                            assert self.polys[advectx][advecty].getArea() > 1-self.threshold
+                                            try:
+                                                assert self.polys[advectx][advecty].getFraction() > 1-self.threshold
+                                            except:
+                                                print(self.polys[advectx][advecty].points)
+                                                print(self.polys[advectx][advecty].getFraction())
+                                                print(self.polys[advectx][advecty].getArea())
+                                                print(1/0)
                                             advected_areas[checkx][checky] += abs(getArea(polyintersection))
                                         else:
                                             #Mixed cell with facet
@@ -216,6 +272,7 @@ class MergeMesh(BaseMesh):
 
                                             #Linear or arc
                                             advectedfacet = advectedfacet.advected(velocity, t, dt)
+
                                             #Add to return
                                             if advect_merge_id not in processed_merge_ids:
                                                 processed_merge_ids.append(advect_merge_id)
@@ -263,17 +320,15 @@ class MergeMesh(BaseMesh):
 
     Unclear if this will run into issues, especially when the interface exits the same edge twice.
 
-    Returns poly objects
+    Returns merge ids #TODO poly objects instead?
     """
     def findOrientations(self):
-        
-        merge_id_to_obj = dict()
 
         class MergeIdWithNeighbors:
 
             def __init__(self, merge_id, neighbor_ids: list):
                 self.merge_id = merge_id
-                self.neighbor_ids = neighbor_ids
+                self.neighbor_ids = neighbor_ids.copy()
                 self.left_neighbor_id = None
                 self.right_neighbor_id = None
 
@@ -339,8 +394,9 @@ class MergeMesh(BaseMesh):
 
             #TODO
             def __str__(self):
-                return f"{self.merge_id}\n{self.left_neighbor_id}\n{self.right_neighbor_id}\n{self.neighbor_ids}\n"
+                return f"Merge id: {self.merge_id}\nLeft neighbor id: {self.left_neighbor_id}\nRight neighbor id: {self.right_neighbor_id}\nCurrent neighbor candidates: {self.neighbor_ids}\n"
 
+        merge_id_to_obj: Dict[int, MergeIdWithNeighbors] = dict()
         process_queue = []
         processed_merge_ids = []
 
@@ -350,31 +406,84 @@ class MergeMesh(BaseMesh):
                 merge_id = self._get_merge_id(x, y)
                 if merge_id is not None and merge_id not in processed_merge_ids:
                     processed_merge_ids.append(merge_id)
-                    neighbor_ids = self._get_neighbor_ids_from_merge_id(merge_id).copy()
+                    neighbor_ids = self._get_neighbor_ids_from_merge_id(merge_id)
                     merge_id_with_neighbors = MergeIdWithNeighbors(merge_id, neighbor_ids)
                     merge_id_to_obj[merge_id] = merge_id_with_neighbors
-                    process_queue.append(merge_id_with_neighbors)
+                    process_queue.append(merge_id)
+
+        # Add new MergeIdWithNeighbors object to merge_id_to_obj which corresponds to merging merge_id with neighbor_id
+        def mergeObjs(merge_id, neighbor_id, use_neighbor_id_orientation=False):
+            # If either id is not in merge_id_to_obj, throw error
+            if merge_id not in merge_id_to_obj.keys():
+                raise ValueError(f"{merge_id} merge id not in {merge_id_to_obj.keys()}")
+            elif neighbor_id not in merge_id_to_obj.keys():
+                raise ValueError(f"{neighbor_id} neighbor id not in {merge_id_to_obj.keys()}")
+
+            merge_id_with_neighbors: MergeIdWithNeighbors = merge_id_to_obj[merge_id]
+            neighbor_id_with_neighbors: MergeIdWithNeighbors = merge_id_to_obj[neighbor_id]
+            # For each of merge_id's (original) neighbors, replace merge_id with self.next_merge_id
+            for merge_neighbor_id in self._get_neighbor_ids_from_merge_id(merge_id):
+                if merge_neighbor_id != neighbor_id:
+                    neighbor_with_neighbors: MergeIdWithNeighbors = merge_id_to_obj[merge_neighbor_id]
+                    if neighbor_with_neighbors.has_left() and neighbor_with_neighbors.get_left() == merge_id:
+                        neighbor_with_neighbors.left_neighbor_id = self.next_merge_id
+                    if neighbor_with_neighbors.has_right() and neighbor_with_neighbors.get_right() == merge_id:
+                        neighbor_with_neighbors.right_neighbor_id = self.next_merge_id
+                    for i in range(len(neighbor_with_neighbors.get_neighbor_ids())):
+                        if neighbor_with_neighbors.get_neighbor_ids()[i] == merge_id:
+                            neighbor_with_neighbors.get_neighbor_ids()[i] = self.next_merge_id
+            # For each of neighbor_id's (original) neighbors, replace neighbor_id with self.next_merge_id
+            for neighbor_neighbor_id in self._get_neighbor_ids_from_merge_id(neighbor_id):
+                if neighbor_neighbor_id != merge_id:
+                    neighbor_with_neighbors: MergeIdWithNeighbors = merge_id_to_obj[neighbor_neighbor_id]
+                    if neighbor_with_neighbors.has_left() and neighbor_with_neighbors.get_left() == neighbor_id:
+                        neighbor_with_neighbors.left_neighbor_id = self.next_merge_id
+                    if neighbor_with_neighbors.has_right() and neighbor_with_neighbors.get_right() == neighbor_id:
+                        neighbor_with_neighbors.right_neighbor_id = self.next_merge_id
+                    for i in range(len(neighbor_with_neighbors.get_neighbor_ids())):
+                        if neighbor_with_neighbors.get_neighbor_ids()[i] == neighbor_id:
+                            neighbor_with_neighbors.get_neighbor_ids()[i] = self.next_merge_id
+
+            # New list of neighbors is merge_id's neighbors + neighbor_id's neighbors
+            # Reset left/right neighbors
+            new_neighbor_ids = list(filter(lambda x : x != merge_id and x != neighbor_id, merge_id_with_neighbors.get_neighbor_ids() + neighbor_id_with_neighbors.get_neighbor_ids()))
+            new_merge_id_with_neighbors = MergeIdWithNeighbors(self.next_merge_id, new_neighbor_ids)
+            if use_neighbor_id_orientation:
+                # Danger: potential to ruin neighbor operation symmetry
+                if neighbor_id_with_neighbors.has_left() and neighbor_id_with_neighbors.get_left() != merge_id:
+                    new_merge_id_with_neighbors.left_neighbor_id = neighbor_id_with_neighbors.get_left()
+                if neighbor_id_with_neighbors.has_right() and neighbor_id_with_neighbors.get_right() != merge_id:
+                    new_merge_id_with_neighbors.right_neighbor_id = neighbor_id_with_neighbors.get_right()
+            merge_id_to_obj[self.next_merge_id] = new_merge_id_with_neighbors
+
+            # Remove merge_id and neighbor_id from merge_id_to_obj
+            merge_id_to_obj.pop(merge_id)
+            merge_id_to_obj.pop(neighbor_id)
+            # Merge polygons and original neighbors
+            self._merge([merge_id, neighbor_id])
+
+            return new_merge_id_with_neighbors
 
         def doGreedyOrientations():
             iters_without_progress = 0
             while process_queue:
-                merge_id_with_neighbors: MergeIdWithNeighbors = process_queue.pop(0)
-                merge_id = merge_id_with_neighbors.get_merge_id()
+                merge_id = process_queue.pop(0)
+                merge_id_with_neighbors: MergeIdWithNeighbors = merge_id_to_obj[merge_id]
                 # 1 neighbor
                 if len(merge_id_with_neighbors.get_neighbor_ids()) == 1:
                     neighbor_id = merge_id_with_neighbors.get_neighbor_ids()[0]
                     # If merge poly only has one unassigned neighbor and only needs to assign one more neighbor, do it
-                    if merge_id_with_neighbors.has_left() and not(merge_id_with_neighbors.has_right()):
+                    if merge_id_with_neighbors.has_left() and not(merge_id_with_neighbors.has_right()) and not(merge_id_to_obj[neighbor_id].has_left()):
                         merge_id_with_neighbors.set_right(neighbor_id)
                         iters_without_progress = 0
-                    elif merge_id_with_neighbors.has_right() and not(merge_id_with_neighbors.has_left()):
+                    elif merge_id_with_neighbors.has_right() and not(merge_id_with_neighbors.has_left()) and not(merge_id_to_obj[neighbor_id].has_right()):
                         merge_id_with_neighbors.set_left(neighbor_id)
                         iters_without_progress = 0
                     # There should never be a case when neither orientation is set but only one neighbor
                     elif not(merge_id_with_neighbors.has_left()) and not(merge_id_with_neighbors.has_right()):
                         print("Neither orientation is set but one neighbor: why did this happen?")
                         #TODO not sure how to handle this, merge into its neighbor for now
-                        process_queue.append(merge_id_with_neighbors)
+                        process_queue.append(merge_id)
                         iters_without_progress += 1
                         #raise ValueError("Neither orientation is set but one neighbor: why did this happen?")
                     # This case should be dealt with via implementation of remove_neighbor_id
@@ -384,6 +493,10 @@ class MergeMesh(BaseMesh):
                         # process_queue.append(merge_id_with_neighbors)
                         # iters_without_progress += 1
                         #raise ValueError("Fully oriented but one neighbor: why did this happen?")
+                    else: # single neighbor but it's already got the neighbor we would want to assign merge_id to
+                        print("Single neighbor but orientations are inconsistent, skip for now")
+                        process_queue.append(merge_id)
+                        iters_without_progress += 1
                 # 2 neighbors
                 elif len(merge_id_with_neighbors.get_neighbor_ids()) == 2:
                     if not(merge_id_with_neighbors.has_left()) and not(merge_id_with_neighbors.has_right()):
@@ -398,16 +511,28 @@ class MergeMesh(BaseMesh):
                                 return not(x < 0 or y < 0 or x >= len(self.polys) or y >= len(self.polys[0]))
                             for i,dir in enumerate(dirs):
                                 neighbor_coords = [x+dir[0], y+dir[1]]
-                                if _helper_in_bounds(neighbor_coords[0], neighbor_coords[1]) and self.polys[neighbor_coords[0]][neighbor_coords[1]].isMixed():
+                                if _helper_in_bounds(neighbor_coords[0], neighbor_coords[1]) and self.polys[neighbor_coords[0]][neighbor_coords[1]].isMixed() and self._get_merge_id(neighbor_coords[0], neighbor_coords[1]) in merge_id_with_neighbors.get_neighbor_ids():
                                     neighbor_dirs.append(i)
                                 else:
                                     nonneighbor_dirs.append(i)
+                            # TODO go by self._get_neighbor_ids_from_merge_ids instead?
                             # if more than two neighbors, then this cell used to have more than two mixed neighbors but some were eliminated, pass
                             if len(neighbor_dirs) > 2:
                                 print("Passing on case where cell used to have more than two mixed neighbors but only two are left, still not easily orientable")
-                                process_queue.append(merge_id_with_neighbors)
+                                process_queue.append(merge_id)
                                 iters_without_progress += 1
                                 continue
+                            elif len(neighbor_dirs) < 2:
+                                # TODO this case might never happen
+                                print("Passing on case where cell has fewer than two cells, not easily orientable")
+                                process_queue.append(merge_id)
+                                iters_without_progress += 1
+                                continue
+                            
+                            # Verifies neighbors = coordinate neighbors
+                            # print(merge_id_with_neighbors.get_neighbor_ids())
+                            # print(list(map(lambda d: self._get_merge_id(x+dirs[d][0], y+dirs[d][1]), neighbor_dirs)))
+
                             # otherwise, two mixed neighbors are either across from each other or adjacent
                             neighbor_modes = abs(neighbor_dirs[0]-neighbor_dirs[1]) # = 1 or 2 or 3 (3 is same case as 1)
                             # 1,3 = adjacent; 2 = across
@@ -421,50 +546,57 @@ class MergeMesh(BaseMesh):
                             if neighbor_modes == 1 or neighbor_modes == 3:
                                 clockwisemost = min(neighbor_dirs) if neighbor_modes == 1 else 3
                                 [c_x, c_y] = [x+dirs[clockwisemost][0], y+dirs[clockwisemost][1]]
+                                c_merge_id = self._get_merge_id(c_x, c_y)
                                 [cc_x, cc_y] = [x+dirs[(clockwisemost+1)%4][0], y+dirs[(clockwisemost+1)%4][1]]
-                                if nonneighbor_statuses == [0, 0]: # both empty, clockwise
+                                cc_merge_id = self._get_merge_id(cc_x, cc_y)
+                                if nonneighbor_statuses == [0, 0] and not(merge_id_to_obj[c_merge_id].has_left()) and not(merge_id_to_obj[cc_merge_id].has_right()): # both empty, clockwise
                                     merge_id_with_neighbors.set_left(self._get_merge_id(cc_x, cc_y))
                                     merge_id_with_neighbors.set_right(self._get_merge_id(c_x, c_y))
                                     iters_without_progress = 0
-                                elif nonneighbor_statuses == [1, 1]: # both full, counterclockwise
+                                elif nonneighbor_statuses == [1, 1] and not(merge_id_to_obj[c_merge_id].has_right()) and not(merge_id_to_obj[cc_merge_id].has_left()): # both full, counterclockwise
                                     merge_id_with_neighbors.set_left(self._get_merge_id(c_x, c_y))
                                     merge_id_with_neighbors.set_right(self._get_merge_id(cc_x, cc_y))
                                     iters_without_progress = 0
                                 else:
-                                    print(neighbor_dirs)
-                                    for neighbor_dir in neighbor_dirs:
-                                        dir = dirs[neighbor_dir]
-                                        neighbor_coords = [x+dir[0], y+dir[1]]
-                                        print(self.polys[neighbor_coords[0]][neighbor_coords[1]])
-                                    print(nonneighbor_dirs)
-                                    print(merge_id_with_neighbors.get_left())
-                                    print(merge_id_with_neighbors.get_right())
-                                    raise ValueError(f"Error in easy orientation with two adjacent neighbors: {nonneighbor_statuses}")
+                                    print(f"Error in easy orientation with two adjacent neighbors: {nonneighbor_statuses}")
+                                    process_queue.append(merge_id)
+                                    iters_without_progress += 1
                             else: # neighbor_modes == 2
                                 if nonneighbor_statuses == [0, 1]:
                                     full_index = 1
                                 elif nonneighbor_statuses == [1, 0]:
                                     full_index = 0
                                 else:
-                                    raise ValueError(f"Error in easy orientation with two opposite neighbors: {nonneighbor_statuses}")
+                                    print(f"Error in easy orientation with two opposite neighbors: {nonneighbor_statuses}")
+                                    process_queue.append(merge_id)
+                                    iters_without_progress += 1
+                                    break
                                 [l_x, l_y] = [x+dirs[(nonneighbor_dirs[full_index]+1)%4][0], y+dirs[(nonneighbor_dirs[full_index]+1)%4][1]]
+                                l_merge_id = self._get_merge_id(l_x, l_y)
                                 [r_x, r_y] = [x+dirs[(nonneighbor_dirs[full_index]-1)%4][0], y+dirs[(nonneighbor_dirs[full_index]-1)%4][1]]
-                                merge_id_with_neighbors.set_left(self._get_merge_id(l_x, l_y))
-                                merge_id_with_neighbors.set_right(self._get_merge_id(r_x, r_y))
-                                iters_without_progress = 0
+                                r_merge_id = self._get_merge_id(r_x, r_y)
+                                if not(merge_id_to_obj[l_merge_id].has_right()) and not(merge_id_to_obj[r_merge_id].has_left()):
+                                    merge_id_with_neighbors.set_left(l_merge_id)
+                                    merge_id_with_neighbors.set_right(r_merge_id)
+                                    iters_without_progress = 0
+                                else:
+                                    print("Error in easy orientation with two opposite neighbors but inconsistent orientations")
+                                    process_queue.append(merge_id)
+                                    iters_without_progress += 1
                         # Not easily orientable, pass
                         else:
                             print("Passing on case with two neighbors and two missing orientations")
-                            process_queue.append(merge_id_with_neighbors)
+                            process_queue.append(merge_id)
                             iters_without_progress += 1
                     elif merge_id_with_neighbors.fully_oriented():
+                        # TODO this doesn't seem to happen
                         print("Fully oriented but two neighbors: why did this happen?")
-                        process_queue.append(merge_id_with_neighbors)
+                        process_queue.append(merge_id)
                         iters_without_progress += 1
                     # One more orientation to be set and two neighbors, pass
                     else:
                         print("Passing on case with two neighbors and one missing orientation")
-                        process_queue.append(merge_id_with_neighbors)
+                        process_queue.append(merge_id)
                         iters_without_progress += 1
                 # 3+ neighbors
                 elif len(merge_id_with_neighbors.get_neighbor_ids()) >= 3:
@@ -472,13 +604,14 @@ class MergeMesh(BaseMesh):
                         raise ValueError(f"Fully oriented but {len(merge_id_with_neighbors.get_neighbor_ids())} neighbors: why did this happen?")
                     else:
                         print("Passing on case with 3+ neighbors")
-                        process_queue.append(merge_id_with_neighbors)
+                        process_queue.append(merge_id)
                         iters_without_progress += 1
                 # 0 neighbors
                 else:
                     # if still not fully oriented, these are problematic and we want to do something
                     if not(merge_id_with_neighbors.fully_oriented()):
-                        process_queue.append(merge_id_with_neighbors)
+                        print("Zero neighbors and not full oriented, passing")
+                        process_queue.append(merge_id)
                         iters_without_progress += 1
 
                 # iters_without_progress = length + 1 (full cycle of queue without progress)
@@ -488,89 +621,191 @@ class MergeMesh(BaseMesh):
 
         doGreedyOrientations()
 
+        # Cases at this point:
+        # 1 neighbor candidate:
+            # Two unfilled neighbors
+            # One unfilled neighbor but orientations are inconsistent
+        # 2 neighbor candidates:
+            # Not an "easy orientation" case
+        # 3+ neighbor candidates:
+            # All
+        # 0 neighbor candidates:
+            # Not fully oriented
+
         iters_without_progress = 0
         while process_queue:
-            merge_id_with_neighbors: MergeIdWithNeighbors = process_queue.pop(0)
-            merge_id = merge_id_with_neighbors.get_merge_id()
+            merge_id = process_queue.pop(0)
+            merge_id_with_neighbors: MergeIdWithNeighbors = merge_id_to_obj[merge_id]
+            print(merge_id)
             if len(merge_id_with_neighbors.get_neighbor_ids()) == 0:
-                # Choose a random mixed neighbor and merge with it
-                neighbor_ids = self._get_neighbor_ids_from_merge_id(merge_id)
-                neighbor_id = neighbor_ids[0] # TODO make random, or choose the one in the direction most normal to the interface?
-                neighbor_id_with_neighbors: MergeIdWithNeighbors = merge_id_to_obj[neighbor_id]
-                neighbor_id_left_with_neighbors:MergeIdWithNeighbors = merge_id_to_obj[neighbor_id_with_neighbors.get_left()]
-                neighbor_id_left_with_neighbors.right_neighbor_id = self.next_merge_id
-                neighbor_id_right_with_neighbors:MergeIdWithNeighbors = merge_id_to_obj[neighbor_id_with_neighbors.get_right()]
-                neighbor_id_right_with_neighbors.left_neighbor_id = self.next_merge_id
-                merge_id_to_obj.pop(merge_id)
-                neighbor_id_with_neighbors.merge_id = self.next_merge_id
-                merge_id_to_obj.pop(neighbor_id)
-                merge_id_to_obj[self.next_merge_id] = neighbor_id_with_neighbors
-                self._merge([merge_id, neighbor_id])
-                iters_without_progress = 0
+                # No orientations set
+                if not(merge_id_with_neighbors.has_left()) and not(merge_id_with_neighbors.has_right()):
+                    print("Weird case 1")
+                    # Choose a random mixed neighbor and merge with it
+                    neighbor_ids = self._get_neighbor_ids_from_merge_id(merge_id)
+                    neighbor_id = neighbor_ids[0] # TODO make random, or choose the one in the direction most normal to the interface?
+                    new_merge_id_with_neighbors = mergeObjs(merge_id, neighbor_id, use_neighbor_id_orientation=True)
+                    process_queue.append(new_merge_id_with_neighbors.get_merge_id())
+                    doGreedyOrientations()
+                    iters_without_progress = 0
+                # Has left neighbor
+                elif merge_id_with_neighbors.has_left():
+                    # TODO am I ok to set its right neighbor to itself
+                    merge_id_with_neighbors.right_neighbor_id = merge_id
+                # Has right neighbor
+                elif merge_id_with_neighbors.has_right():
+                    # TODO am I ok to set its left neighbor to itself
+                    merge_id_with_neighbors.left_neighbor_id = merge_id
             elif merge_id_with_neighbors.has_left() and not(merge_id_with_neighbors.has_right()):
+                print("Weird case 2")
                 left_neighbor_id = merge_id_with_neighbors.get_left()
                 neighbor_ids = self._get_neighbor_ids_from_merge_id(merge_id)
+                did_update = False
                 for i, neighbor_id in enumerate(neighbor_ids):
-                    if neighbor_id == left_neighbor_id:
+                    if neighbor_id == left_neighbor_id and not(merge_id_to_obj[neighbor_ids[(i+1) % len(neighbor_ids)]].has_left()):
                         # This uses a hack: since we processed neighbors in counterclockwise order, this should give the mixed neighbor to the right of the left neighbor
+                        # TODO is this neighbor guaranteed to not already have a left neighbor?
                         merge_id_with_neighbors.set_right(neighbor_ids[(i+1) % len(neighbor_ids)], set_neighbor=True)
-                doGreedyOrientations()
-                iters_without_progress = 0
+                        did_update = True
+                if did_update:
+                    doGreedyOrientations()
+                    iters_without_progress = 0
+                else:
+                    process_queue.append(merge_id_with_neighbors.get_merge_id())
+                    iters_without_progress += 1
             elif not(merge_id_with_neighbors.has_left()) and merge_id_with_neighbors.has_right():
+                print("Weird case 3")
                 right_neighbor_id = merge_id_with_neighbors.get_right()
                 neighbor_ids = self._get_neighbor_ids_from_merge_id(merge_id)
+                did_update = False
                 for i, neighbor_id in enumerate(neighbor_ids):
-                    if neighbor_id == right_neighbor_id:
+                    if neighbor_id == right_neighbor_id and not(merge_id_to_obj[neighbor_ids[(i-1) % len(neighbor_ids)]].has_right()):
                         # This uses a hack: since we processed neighbors in counterclockwise order, this should give the mixed neighbor to the left of the right neighbor
+                        # TODO is this neighbor guaranteed to not already have a right neighbor?
                         merge_id_with_neighbors.set_left(neighbor_ids[(i-1) % len(neighbor_ids)], set_neighbor=True)
-                doGreedyOrientations()
-                iters_without_progress = 0
+                        did_update = True
+                if did_update:
+                    doGreedyOrientations()
+                    iters_without_progress = 0
+                else:
+                    process_queue.append(merge_id_with_neighbors.get_merge_id())
+                    iters_without_progress += 1
             else:
-                process_queue.append(merge_id_with_neighbors)
+                print("Weird case 4")
+                process_queue.append(merge_id_with_neighbors.get_merge_id())
                 iters_without_progress += 1
             if iters_without_progress >= len(process_queue)+1:
                 print(f"Rest of meta queue cannot be resolved: length {len(process_queue)}")
                 break
 
-        very_ambiguous_ids = process_queue.copy()
-        while process_queue:
-            merge_id_with_neighbors: MergeIdWithNeighbors = process_queue.pop(0)
-            merge_id = merge_id_with_neighbors.get_merge_id()
-            # TODO handle other cases (neither left nor right neighbors are set?)
-            print(f"Unresolved cells: num neighbors = {len(merge_id_with_neighbors.get_neighbor_ids())}")
-            print(merge_id_with_neighbors)
-            # Choose a random mixed neighbor and merge with it
-            neighbor_ids = list(filter(lambda x : x not in list(map(lambda y : y.get_merge_id(), very_ambiguous_ids)), merge_id_with_neighbors.get_neighbor_ids()))
-            if len(neighbor_ids) == 0:
-                neighbor_ids = list(filter(lambda x : x not in list(map(lambda y : y.get_merge_id(), very_ambiguous_ids)), self._get_neighbor_ids_from_merge_id(merge_id)))
-                if len(neighbor_ids) == 0:
-                    #TODO no clue if this is possible
-                    raise ValueError("Is it possible that an entirely unoriented cell also has no neighbors not in process queue here?")
-            neighbor_id = neighbor_ids[0]
-            # TODO make random, or choose the one in the direction most normal to the interface?
-            neighbor_id_with_neighbors: MergeIdWithNeighbors = merge_id_to_obj[neighbor_id]
-            print(neighbor_id_with_neighbors)
-            neighbor_id_left_with_neighbors:MergeIdWithNeighbors = merge_id_to_obj[neighbor_id_with_neighbors.get_left()]
-            neighbor_id_left_with_neighbors.right_neighbor_id = self.next_merge_id
-            neighbor_id_right_with_neighbors:MergeIdWithNeighbors = merge_id_to_obj[neighbor_id_with_neighbors.get_right()]
-            neighbor_id_right_with_neighbors.left_neighbor_id = self.next_merge_id
-            merge_id_to_obj.pop(merge_id)
-            neighbor_id_with_neighbors.merge_id = self.next_merge_id
-            merge_id_to_obj.pop(neighbor_id)
-            merge_id_to_obj[self.next_merge_id] = neighbor_id_with_neighbors
-            self._merge([merge_id, neighbor_id])
+        # very_ambiguous_ids = process_queue.copy()
+
+        # # Attempts to merge cells that are still unresolved
+        # while process_queue:
+        #     merge_id_with_neighbors: MergeIdWithNeighbors = process_queue.pop(0)
+        #     merge_id = merge_id_with_neighbors.get_merge_id()
+        #     # TODO handle other cases (neither left nor right neighbors are set?)
+        #     print(f"Unresolved cells: num neighbors = {len(merge_id_with_neighbors.get_neighbor_ids())}")
+        #     # Choose a random mixed neighbor and merge with it
+        #     neighbor_ids = list(filter(lambda x : x not in list(map(lambda y : y.get_merge_id(), very_ambiguous_ids)), merge_id_with_neighbors.get_neighbor_ids()))
+        #     if len(neighbor_ids) == 0:
+        #         neighbor_ids = list(filter(lambda x : x not in list(map(lambda y : y.get_merge_id(), very_ambiguous_ids)), self._get_neighbor_ids_from_merge_id(merge_id)))
+        #         if len(neighbor_ids) == 0:
+        #             #TODO no clue if this is possible
+        #             raise ValueError("Is it possible that an entirely unoriented cell also has no neighbors not in process queue here?")
+        #     neighbor_id = neighbor_ids[0]
+        #     # TODO make random, or choose the one in the direction most normal to the interface?
+        #     mergeObjs(merge_id, neighbor_id, use_neighbor_id_orientation=True)
 
         # Create polygon objects
 
         # Find the vertices of the merged polygons
         self.createMergedPolys()
 
+        # Merge ids that failed to be oriented
+        failed_merge_ids = []
+        added_merge_ids = dict()
         for merge_id in merge_id_to_obj.keys():
-            merged_poly: NeighboredPolygon = self.merged_polys[merge_id]
-            merged_poly.setNeighbor(self.merged_polys[merge_id_to_obj[merge_id].get_left()], "left")
-            merged_poly.setNeighbor(self.merged_polys[merge_id_to_obj[merge_id].get_right()], "right")
-            merged_poly.setCircularFacet()
+            merge_id_with_neighbors: MergeIdWithNeighbors = merge_id_to_obj[merge_id]
+            if merge_id_with_neighbors.fully_oriented():
+                merged_poly: NeighboredPolygon = self.merged_polys[merge_id]
+                merged_poly.setNeighbor(self.merged_polys[merge_id_with_neighbors.get_left()], "left")
+                merged_poly.setNeighbor(self.merged_polys[merge_id_with_neighbors.get_right()], "right")
+                # Check if we used hack and had set left/right neighbor to itself to signify dead-end cell with single mixed neighbor
+                if merge_id_with_neighbors.get_left() == merge_id or merge_id_with_neighbors.get_right() == merge_id:
+                    merged_poly.setFacetType("linear")
+            else:
+                print("Final failed orientations:")
+                print(merge_id_with_neighbors)
+                # For all polys in failed merge id, add a lone polygon with a 3x3 stencil and run Young's
+                # May still need this poly because it could be a neighbor of something else so can't directly remove it
+                for merge_coords in self._get_merge_coords(merge_id_with_neighbors.get_merge_id()):
+                    lone_base_poly = self.polys[merge_coords[0]][merge_coords[1]]
+                    merged_poly = NeighboredPolygon(lone_base_poly.points)
+                    merged_poly.setFraction(lone_base_poly.getFraction())
+                    merged_poly.set3x3Stencil(self.get3x3Stencil(merge_coords[0], merge_coords[1]))
 
-        return list(map(lambda x : self.merged_polys[x], merge_id_to_obj.keys()))
+                    # TODO does this throw off the algorithm somehow because we're appending to merge_id_to_obj only? (Some invariant where merge_id_to_obj has to have same length as something else?)
+                    self.merged_polys[self.next_merge_id] = merged_poly
+                    self.coords_to_merge_id[merge_coords[0]][merge_coords[1]] = self.next_merge_id
+                    self.merge_ids_to_coords.append(merge_coords)
+                    self.merge_id_to_neighbor_ids.append([])
+                    added_merge_ids[self.next_merge_id] = merged_poly
+                    self.next_merge_id += 1
+                failed_merge_ids.append(merge_id)
+
+        # Remove failed merge ids from list of polygons
+        for failed_merge_id in failed_merge_ids:
+            merge_id_to_obj.pop(failed_merge_id)
+        # Add Young's polygons
+        for added_merge_id in added_merge_ids.keys():
+            merge_id_to_obj[added_merge_id] = added_merge_ids[added_merge_id]
+        return list(merge_id_to_obj.keys())
 
 #TODO return polys instead and write different functions for only linear vs. only circular vs. corners?
+
+    def fitFacets(self, merge_ids, setting="circular"):
+        if setting == "linear":
+            i = 0
+            while i < len(merge_ids):
+                merge_id = merge_ids[i]
+                merged_poly: NeighboredPolygon = self.merged_polys[merge_id]
+                if merged_poly.fullyOriented():
+                    merged_poly.fitLinearFacet()
+                elif merged_poly.has3x3Stencil():
+                    merged_poly.runYoungs()
+                else:
+                    print("Skip")
+                    print(self.merged_polys[merge_id])
+                    merge_ids.pop(i)
+                    i -= 1
+                i += 1
+
+        elif setting == "circular":
+            i = 0
+            while i < len(merge_ids):
+                merge_id = merge_ids[i]
+                merged_poly: NeighboredPolygon = self.merged_polys[merge_id]
+                if merged_poly.fullyOriented():
+                    if merged_poly.facet_type == "linear":
+                        merged_poly.fitLinearFacet()
+                    else:
+                        merged_poly.fitCircularFacet()
+                elif merged_poly.has3x3Stencil():
+                    merged_poly.runYoungs()
+                else:
+                    merge_ids.pop(i)
+                    i -= 1
+                i += 1
+
+        elif setting == "linear+corner":
+            pass
+
+        elif setting == "circular+corner":
+            pass
+
+        elif setting == "extra_corners":
+            pass
+
+        # Return merge_polys
+        return list(map(lambda x : self.merged_polys[x], merge_ids))

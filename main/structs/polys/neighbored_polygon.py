@@ -9,11 +9,15 @@ class NeighboredPolygon(BasePolygon):
     def __init__(self, points):
         super().__init__(points)
 
+        self.facet_type = None
         self.left_neighbor = None
         self.right_neighbor = None
 
         #TODO List of unoriented neighbors, maybe useful later?
         self.unoriented_neighbors = []
+
+    def setFacetType(self, facet_type):
+        self.facet_type = facet_type
 
     #poly = NeighboredPolygon
     #orientation = "left", "right", other
@@ -40,7 +44,10 @@ class NeighboredPolygon(BasePolygon):
     def hasRightNeighbor(self):
         return (self.right_neighbor is not None)
 
-    def setCircularFacet(self):
+    def fullyOriented(self):
+        return self.hasLeftNeighbor() and self.hasRightNeighbor()
+
+    def fitCircularFacet(self):
         # If both neighbors, try linear and circular TODO
         if self.hasLeftNeighbor() and self.hasRightNeighbor():
             linearerrorthreshold = 1e-6 #if area fraction error in linear facet < linearerrorthreshold, use linear facet at this cell
@@ -70,7 +77,23 @@ class NeighboredPolygon(BasePolygon):
                     intersects = getPolyLineIntersects(self.points, facetline1, facetline2)
                     self.setFacet(LinearFacet(intersects[0], intersects[-1]))
         else:
-            print("Failed to make facet")
+            print("Not enough neighbors: failed to make circular facet")
+
+    def fitLinearFacet(self):
+        if self.hasLeftNeighbor() and self.hasRightNeighbor():
+            threshold = 1e-10 # linear facet optimization
+            l1, l2 = getLinearFacet(self.left_neighbor.points, self.right_neighbor.points, self.left_neighbor.getFraction(), self.right_neighbor.getFraction(), threshold)
+            normal = [(-l2[1]+l1[1])/getDistance(l1, l2), (l2[0]-l1[0])/getDistance(l1, l2)]
+            #TODO getLinearFacetFromNormal failed on areafraction=1e-8, threshold=1e-12
+            try:
+                facetline1, facetline2 = getLinearFacetFromNormal(self.points, self.getFraction(), normal, threshold)
+            except:
+                print(f"getLinearFacetFromNormal({self.points}, {self.getFraction()}, {normal}, {threshold})")
+                facetline1, facetline2 = getLinearFacetFromNormal(self.points, self.getFraction()*1e3, normal, threshold)
+            intersects = getPolyLineIntersects(self.points, facetline1, facetline2)
+            self.setFacet(LinearFacet(intersects[0], intersects[-1]))
+        else:
+            print("Not enough neighbors: failed to make linear facet")
 
     #TODO add settings for only circles / only lines / corners
 

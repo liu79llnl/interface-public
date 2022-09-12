@@ -1,0 +1,16 @@
+TEST:
+  FROM_TEMP: false
+  SAVE_NAME: vortex_64
+  SETTING: vortex
+
+MESH:
+  GRID_SIZE: 100
+  RESOLUTION: 0.64
+
+GEOMS:
+  FACET_ALGO: linear
+  THRESHOLD: 1.0e-10
+
+ADVECTION:
+  DT: 0.01
+  T_TOTAL: 4

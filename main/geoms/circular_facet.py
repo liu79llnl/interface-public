@@ -422,7 +422,7 @@ def getArcFacet(poly1, poly2, poly3, afrac1, afrac2, afrac3, epsilon, gcenterx=N
                     rgap /= 2
             #Max range of radius hit, return error
             if radius**2 - ((r3-r1)**2) / 4 < 0:
-                print("Error in getArcFacet({}, {}, {}, {}, {}, {}, {})".format(poly1, poly2, poly3, a1, a2, a3, epsilon))
+                print("Error in getArcFacet({}, {}, {}, {}, {}, {}, {})".format(poly1, poly2, poly3, afrac1, afrac2, afrac3, epsilon))
                 return None, None, None
             center = [(r1+r3)/2, math.sqrt(radius**2 - ((r3-r1)**2) / 4)]
             cura2, _ = getCircleIntersectArea(center, radius, rpoly2)
@@ -443,7 +443,7 @@ def getArcFacet(poly1, poly2, poly3, afrac1, afrac2, afrac3, epsilon, gcenterx=N
             da1dr1 = (cura1plusdt-cura1)/dt
             #Numerical derivative is 0, return error
             if da1dr1 == 0:
-                print("Error in getArcFacet({}, {}, {}, {}, {}, {}, {})".format(poly1, poly2, poly3, a1, a2, a3, epsilon))
+                print("Error in getArcFacet({}, {}, {}, {}, {}, {}, {})".format(poly1, poly2, poly3, afrac1, afrac2, afrac3, epsilon))
                 return None, None, None
             r1 = max(r3 - 2*radius, r1 + (a1-cura1)/da1dr1)
             center = [(r1+r3)/2, math.sqrt(radius**2 - ((r3-r1)**2) / 4)]
@@ -487,7 +487,7 @@ def getArcFacet(poly1, poly2, poly3, afrac1, afrac2, afrac3, epsilon, gcenterx=N
                     rgap /= 2
             #Max range of radius hit, return error
             if radius**2 - ((r3-r1)**2) / 4 < 0:
-                print("Error in getArcFacet({}, {}, {}, {}, {}, {}, {})".format(poly1, poly2, poly3, a1, a2, a3, epsilon))
+                print("Error in getArcFacet({}, {}, {}, {}, {}, {}, {})".format(poly1, poly2, poly3, afrac1, afrac2, afrac3, epsilon))
                 return None, None, None
             center = [(r1+r3)/2, math.sqrt(radius**2 - ((r3-r1)**2) / 4)]
             cura2, _ = getCircleIntersectArea(center, radius, rpoly2)
@@ -508,7 +508,7 @@ def getArcFacet(poly1, poly2, poly3, afrac1, afrac2, afrac3, epsilon, gcenterx=N
             da3dr3 = (cura3-cura3minusdt)/dt
             #Numerical derivative is 0, return error
             if da3dr3 == 0:
-                print("Error in getArcFacet({}, {}, {}, {}, {}, {}, {})".format(poly1, poly2, poly3, a1, a2, a3, epsilon))
+                print("Error in getArcFacet({}, {}, {}, {}, {}, {}, {})".format(poly1, poly2, poly3, afrac1, afrac2, afrac3, epsilon))
                 return None, None, None
             r3 = min(r1 + 2*radius, r3 + (a3-cura3)/da3dr3)
             center = [(r1+r3)/2, math.sqrt(radius**2 - ((r3-r1)**2) / 4)]
@@ -526,7 +526,7 @@ def getArcFacet(poly1, poly2, poly3, afrac1, afrac2, afrac3, epsilon, gcenterx=N
             return unrot(center), radius, returnintersects
 
     #Max timesteps reached: return failure
-    print("Max timesteps reached in getArcFacet({}, {}, {}, {}, {}, {}, {})".format(poly1, poly2, poly3, a1, a2, a3, epsilon))
+    print("Max timesteps reached in getArcFacet({}, {}, {}, {}, {}, {}, {})".format(poly1, poly2, poly3, afrac1, afrac2, afrac3, epsilon))
     return None, None, None
 
 #Assume edges are shared between poly1 and poly2, poly2 and poly3

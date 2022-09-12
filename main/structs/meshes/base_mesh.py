@@ -84,20 +84,22 @@ class BaseMesh:
                 elif abs(adjusted_fraction) < self.threshold:
                     adjusted_fraction = 0
 
-                self.polys[x][y].setFraction(adjusted_fraction)
+                # self.polys[x][y].setFraction(adjusted_fraction)
+                self.polys[x][y].setFraction(fractions[x][y])
+
                 patchareas.append(adjusted_fraction)
                 patchpartialareas.append(math.ceil(adjusted_fraction - math.floor(adjusted_fraction)))
 
         self._plt_patchareas = np.array(patchareas)
         self._plt_patchpartialareas = np.array(patchpartialareas)
 
-    def writeToPickle(self, path):
+    def writeToPickle(self, path, iter=0):
         base_path = '/'.join(path.split('/')[:-1])
         if not os.path.exists(base_path):
             os.makedirs(base_path, exist_ok=True)
 
         f = open(path, "wb")
-        pickle.dump(self, f)
+        pickle.dump([self, iter], f)
 
     #Plot mesh and areas as plt images
     def plotPolyValues(self, values, path):
