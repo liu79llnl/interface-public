@@ -13,4 +13,4 @@ GEOMS:
 
 ADVECTION:
   DT: 0.01
-  T_TOTAL: 2
+  T_TOTAL: 4

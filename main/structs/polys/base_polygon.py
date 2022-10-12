@@ -94,5 +94,3 @@ class BasePolygon:
             return f"\nPoints: {self.points}\nFraction: {self.fraction}\nFacet: {self.facet}\n"
         else:
             return f"\nPoints: {self.points}\nFraction: {self.fraction}\n"
-
-            

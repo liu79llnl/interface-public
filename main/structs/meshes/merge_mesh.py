@@ -7,6 +7,11 @@ from main.geoms.circular_facet import getCircleIntersectArea
 from main.structs.facets.base_facet import advectPoint
 
 from typing import Dict
+import math
+import numpy as np
+import matplotlib.pyplot as plt
+from matplotlib.patches import Polygon as plt_polygon
+from matplotlib.collections import PatchCollection
 
 class MergeMesh(BaseMesh):
 
@@ -216,7 +221,7 @@ class MergeMesh(BaseMesh):
                 merge_id = self._get_merge_id(x, y)
                 if merge_id is not None and merge_id not in self.merged_polys.keys():
                     merge_coords = self._get_merge_coords(merge_id).copy()
-                    self.merged_polys[merge_id] = self._helper_createMergedPolys(merge_coords)
+                    self.merged_polys[merge_id] : NeighboredPolygon = self._helper_createMergedPolys(merge_coords)
 
     def advectMergedFacets(self, velocity, t, dt, checkSize=2):
 
@@ -761,6 +766,39 @@ class MergeMesh(BaseMesh):
         for added_merge_id in added_merge_ids.keys():
             merge_id_to_obj[added_merge_id] = added_merge_ids[added_merge_id]
         return list(merge_id_to_obj.keys())
+
+    def updatePlts(self):
+        # Plot variables
+        self._plt_patches = []
+        self._plt_patchareas = []
+        self._plt_patchpartialareas = []
+        # TODO self._plt_patchinitialareas = []
+
+        processed_merge_ids = []
+
+        # Add all merge ids in use to the queue
+        for x in range(len(self.polys)):
+            for y in range(len(self.polys[0])):
+                merge_id = self._get_merge_id(x, y)
+                if merge_id is None:
+                    # Full/empty cells
+                    patch = plt_polygon(np.array(self.polys[x][y].points), True)
+                    self._plt_patches.append(patch)
+                    adjusted_fraction = self.polys[x][y].getFraction()
+                    self._plt_patchareas.append(adjusted_fraction)
+                    self._plt_patchpartialareas.append(math.ceil(adjusted_fraction - math.floor(adjusted_fraction)))
+                elif merge_id not in processed_merge_ids:
+                    # Mixed merged cell
+                    merged_cell = self.merged_polys[merge_id]
+                    patch = plt_polygon(np.array(merged_cell.points), True)
+                    self._plt_patches.append(patch)
+                    adjusted_fraction = merged_cell.getFraction()
+                    self._plt_patchareas.append(adjusted_fraction)
+                    self._plt_patchpartialareas.append(math.ceil(adjusted_fraction - math.floor(adjusted_fraction)))
+
+        self._plt_patchareas = np.array(self._plt_patchareas)
+        self._plt_patchpartialareas = np.array(self._plt_patchpartialareas)
+        self._plt_patchinitialareas = np.array(self._plt_patchinitialareas)
 
 #TODO return polys instead and write different functions for only linear vs. only circular vs. corners?
 

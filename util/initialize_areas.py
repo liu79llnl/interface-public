@@ -1,15 +1,17 @@
 import math
+import numpy as np
+import matplotlib.pyplot as plt
+from matplotlib.patches import Polygon
+from matplotlib.collections import PatchCollection
+
 from main.geoms.geoms import getDistance, getArea, mergePolys, getPolyIntersectArea, getPolyLineArea, getPolyLineIntersects, lineIntersect, getCentroid
 from main.geoms.linear_facet import getLinearFacet
 from main.geoms.circular_facet import getCircleIntersectArea, getCircleCircleIntersects, getArcFacet, getArcFacetNewton, getCircleLineIntersects2, getCenter
 from main.geoms.corner_facet import getPolyCornerArea, getPolyCurvedCornerArea, getCurvedCornerFacet
-import numpy as np
-from scipy.integrate import dblquad
-
 from main.structs.polys.base_polygon import BasePolygon
 from main.structs.meshes.base_mesh import BaseMesh
 
-#m = BaseMesh, return areas array
+# return areas array
 def initializeCircle(m: BaseMesh, center, radius):
     areas = [[0] * len(m.polys[0]) for _ in range(len(m.polys))]
 
@@ -35,7 +37,7 @@ def initializePoly(m: BaseMesh, poly):
 
     return areas
 
-#theta is angle from positive x-axis to major axis
+# theta is angle from positive x-axis to major axis
 def initializeEllipse(m: BaseMesh, major_axis, minor_axis, theta, center):
     areas = [[0] * len(m.polys[0]) for _ in range(len(m.polys))]
 
@@ -53,7 +55,7 @@ def initializeEllipse(m: BaseMesh, major_axis, minor_axis, theta, center):
 
     return areas
 
-#Example from Zalesak: circle with rectangle removed, use with 100x100 grid
+# Example from Zalesak: circle with rectangle removed, use with 100x100 grid
 def zalesak(m: BaseMesh):
     areas = [[0] * len(m.polys[0]) for _ in range(len(m.polys))]
 
@@ -82,7 +84,7 @@ def zalesak(m: BaseMesh):
 
     return areas
 
-#x+o example: use with 100x100 grid
+# x+o example: use with 100x100 grid
 def xpluso(m: BaseMesh):
     areas = [[0] * len(m.polys[0]) for _ in range(len(m.polys))]
 
@@ -132,46 +134,19 @@ def xpluso(m: BaseMesh):
 
     return areas
 
-import matplotlib.pyplot as plt
-from matplotlib.patches import Polygon
-from matplotlib.collections import PatchCollection
-import numpy as np
+# Initialize areas for advection tests
+def initializeAreas(m: BaseMesh, test_setting="vortex"):
+    if test_setting == "vortex":
+        fractions = initializeCircle(m, [50.01, 75.01], 15)
+    if test_setting == "deformation":
+        fractions = initializeCircle(m, [50.01, 75.01], 15)
+    elif test_setting == "zalesak":
+        fractions = zalesak(m)
+    elif test_setting == "xpluso":
+        fractions = xpluso(m)
+    elif test_setting == "triangle":
+        fractions = initializePoly(m, [[1.5, 1.5], [9.5, 11.5], [5.5, 15.2]])
+    elif test_setting == "rectangle":
+        fractions = initializePoly(m, [[8.2, 8.2], [12.2, 5.2], [15.2, 9.2], [11.2, 12.2]])
 
-def plotAreas(opolys, areas):
-    listpatches = []
-    listareas = []
-    listpartials = []
-    for x in range(len(opolys)):
-        for y in range(len(opolys[0])):
-            opoly = opolys[x][y]
-            opolyarea = getArea(opoly)
-            #area_fraction = areas[x][y]/opolyarea
-            area_fraction = areas[x][y]/opolyarea
-            patch = Polygon(np.array(opoly), True)
-            listpatches.append(patch)
-            listareas.append(area_fraction)
-            listpartials.append(math.ceil(area_fraction) - math.floor(area_fraction))
-
-    #Max x and y of opolys grid
-    maxX = max(list(map(lambda x : x[0], opolys[len(opolys)-1][len(opolys[0])-1])))
-    maxY = max(list(map(lambda x : x[1], opolys[len(opolys)-1][len(opolys[0])-1])))
-
-    p = PatchCollection(listpatches, cmap='jet')
-    patchareas = np.array(listareas)
-    p.set_array(patchareas)
-    fig, ax = plt.subplots()
-    ax.set_xlim(0, maxX)
-    ax.set_ylim(0, maxY)
-    ax.add_collection(p)
-    plt.savefig("advection_plt/original_areas.png", dpi=199)
-    plt.clf()
-
-    p = PatchCollection(listpatches, cmap='jet')
-    patchareas = np.array(listpartials)
-    p.set_array(patchareas)
-    fig, ax = plt.subplots()
-    ax.set_xlim(0, maxX)
-    ax.set_ylim(0, maxY)
-    ax.add_collection(p)
-    plt.savefig("advection_plt/original_partials.png", dpi=199)
-    plt.clf()
+    return fractions
