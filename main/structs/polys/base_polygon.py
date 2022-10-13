@@ -82,7 +82,7 @@ class BasePolygon:
         return (self.stencil is not None)
 
     def runYoungs(self):
-        assert self.stencil is not None
+        assert self.has3x3Stencil()
         threshold = 1e-10 # linear facet optimization
         normal = getYoungsNormal(self.stencil)
         facetline1, facetline2 = getLinearFacetFromNormal(self.points, self.getFraction(), normal, threshold)

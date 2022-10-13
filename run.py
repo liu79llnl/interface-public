@@ -99,6 +99,8 @@ def main(config_setting):
         writeToPickle(m, f"plots/{save_name}/temp.pickle", iter)
 
         t += dt
+        if t == 0.14:
+            print(1/0)
 
 if __name__ == "__main__":
 

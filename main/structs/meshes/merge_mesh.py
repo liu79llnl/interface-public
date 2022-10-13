@@ -2,7 +2,7 @@ from concurrent.futures import process
 from main.structs.meshes.base_mesh import BaseMesh
 from main.structs.polys.base_polygon import BasePolygon
 from main.structs.polys.neighbored_polygon import NeighboredPolygon
-from main.geoms.geoms import mergePolys, getPolyIntersectArea, getArea, getPolyLineArea
+from main.geoms.geoms import getDistance, mergePolys, getPolyIntersectArea, getArea, getPolyLineArea
 from main.geoms.circular_facet import getCircleIntersectArea
 from main.structs.facets.base_facet import advectPoint
 
@@ -641,7 +641,6 @@ class MergeMesh(BaseMesh):
         while process_queue:
             merge_id = process_queue.pop(0)
             merge_id_with_neighbors: MergeIdWithNeighbors = merge_id_to_obj[merge_id]
-            print(merge_id)
             if len(merge_id_with_neighbors.get_neighbor_ids()) == 0:
                 # No orientations set
                 if not(merge_id_with_neighbors.has_left()) and not(merge_id_with_neighbors.has_right()):
@@ -656,22 +655,71 @@ class MergeMesh(BaseMesh):
                 # Has left neighbor
                 elif merge_id_with_neighbors.has_left():
                     # TODO am I ok to set its right neighbor to itself
+                    print("Weird case 1b: right")
                     merge_id_with_neighbors.right_neighbor_id = merge_id
                 # Has right neighbor
                 elif merge_id_with_neighbors.has_right():
                     # TODO am I ok to set its left neighbor to itself
+                    print("Weird case 1c: left")
                     merge_id_with_neighbors.left_neighbor_id = merge_id
             elif merge_id_with_neighbors.has_left() and not(merge_id_with_neighbors.has_right()):
                 print("Weird case 2")
                 left_neighbor_id = merge_id_with_neighbors.get_left()
                 neighbor_ids = self._get_neighbor_ids_from_merge_id(merge_id)
+                merge_coords = self._get_merge_coords(merge_id)[0] # choose first poly within merged poly
                 did_update = False
+
+                # Construct Young's linear facet and use it to make guess about correct neighbor
+                base_poly = self.polys[merge_coords[0]][merge_coords[1]]
+                youngs_poly = BasePolygon(base_poly.points)
+                youngs_poly.setFraction(base_poly.getFraction())
+                youngs_poly.set3x3Stencil(self.get3x3Stencil(merge_coords[0], merge_coords[1]))
+                youngs_poly.runYoungs()
+                youngs_poly_pLeft = youngs_poly.getFacet().pLeft
+                youngs_poly_pRight = youngs_poly.getFacet().pRight
+                
+                # Metric to calculate how close a point is to a polygon's edges: equal to 1 if point lies on an edge
+                # TODO not an ideal metric: poly = [[0, 0], [1, 0], [1, 1], [0, 1]], p1 = [0.5, 0.1] vs. p2 = [0.7, 0.1]. p2 closer
+                # to edges but has larger value of metric
+                def _helper_pointDistanceToPolyEdges(x, poly_points):
+                    ret = float("inf")
+                    for i in range(len(poly_points)):
+                        p1 = poly_points[i]
+                        p2 = poly_points[(i+1) % len(poly_points)]
+                        d = (getDistance(x, p1) + getDistance(x, p2))/(getDistance(p1, p2))
+                        ret = min(d, ret)
+                    return ret
+                    
+                # For each neighboring poly, calculate metric; choose neighbor with min metric
+                min_i = None
+                min_metric = float("inf")
+                for i, neighbor_id in enumerate(neighbor_ids):
+                    # Don't want to choose the neighbor that's already set, or one that has a left neighbor already
+                    if neighbor_id != left_neighbor_id and not(merge_id_to_obj[neighbor_id].has_left()):
+                        neighbor_coords = self._get_merge_coords(neighbor_id)[0] # choose first poly within merged poly
+                        neighbor_poly_points = self.polys[neighbor_coords[0]][neighbor_coords[1]].points
+                        d = min(
+                            _helper_pointDistanceToPolyEdges(youngs_poly_pLeft, neighbor_poly_points),
+                            _helper_pointDistanceToPolyEdges(youngs_poly_pRight, neighbor_poly_points)
+                        )
+                        if d < min_metric:
+                            print(f"Metric left: {d}")
+                            min_i = i
+                            min_metric = d
+                            did_update = True
+                # If we found one, set neighbor
+                if did_update:
+                    merge_id_with_neighbors.set_right(neighbor_ids[min_i], set_neighbor=True)
+
+                """
+                # This uses a hack: since we processed neighbors in counterclockwise order, this should give the mixed neighbor to the right of the left neighbor
+                # TODO is this neighbor guaranteed to not already have a left neighbor?
                 for i, neighbor_id in enumerate(neighbor_ids):
                     if neighbor_id == left_neighbor_id and not(merge_id_to_obj[neighbor_ids[(i+1) % len(neighbor_ids)]].has_left()):
-                        # This uses a hack: since we processed neighbors in counterclockwise order, this should give the mixed neighbor to the right of the left neighbor
-                        # TODO is this neighbor guaranteed to not already have a left neighbor?
                         merge_id_with_neighbors.set_right(neighbor_ids[(i+1) % len(neighbor_ids)], set_neighbor=True)
                         did_update = True
+                """
+
                 if did_update:
                     doGreedyOrientations()
                     iters_without_progress = 0
@@ -682,13 +730,61 @@ class MergeMesh(BaseMesh):
                 print("Weird case 3")
                 right_neighbor_id = merge_id_with_neighbors.get_right()
                 neighbor_ids = self._get_neighbor_ids_from_merge_id(merge_id)
+                merge_coords = self._get_merge_coords(merge_id)[0] # choose first poly within merged poly
                 did_update = False
+
+                # Construct Young's linear facet and use it to make guess about correct neighbor
+                print(merge_coords)
+                base_poly = self.polys[merge_coords[0]][merge_coords[1]]
+                youngs_poly = BasePolygon(base_poly.points)
+                youngs_poly.setFraction(base_poly.getFraction())
+                youngs_poly.set3x3Stencil(self.get3x3Stencil(merge_coords[0], merge_coords[1]))
+                youngs_poly.runYoungs()
+                youngs_poly_pLeft = youngs_poly.getFacet().pLeft
+                youngs_poly_pRight = youngs_poly.getFacet().pRight
+                
+                # Metric to calculate how close a point is to a polygon's edges: equal to 1 if point lies on an edge
+                # TODO not an ideal metric: poly = [[0, 0], [1, 0], [1, 1], [0, 1]], p1 = [0.5, 0.1] vs. p2 = [0.7, 0.1]. p2 closer
+                # to edges but has larger value of metric
+                def _helper_pointDistanceToPolyEdges(x, poly_points):
+                    ret = float("inf")
+                    for i in range(len(poly_points)):
+                        p1 = poly_points[i]
+                        p2 = poly_points[(i+1) % len(poly_points)]
+                        d = (getDistance(x, p1) + getDistance(x, p2))/(getDistance(p1, p2))
+                        ret = min(d, ret)
+                    return ret
+                    
+                # For each neighboring poly, calculate metric; choose neighbor with min metric
+                min_i = None
+                min_metric = float("inf")
+                for i, neighbor_id in enumerate(neighbor_ids):
+                    # Don't want to choose the neighbor that's already set, or one that has a right neighbor already
+                    if neighbor_id != right_neighbor_id and not(merge_id_to_obj[neighbor_id].has_right()):
+                        neighbor_coords = self._get_merge_coords(neighbor_id)[0] # choose first poly within merged poly
+                        neighbor_poly_points = self.polys[neighbor_coords[0]][neighbor_coords[1]].points
+                        d = min(
+                            _helper_pointDistanceToPolyEdges(youngs_poly_pLeft, neighbor_poly_points),
+                            _helper_pointDistanceToPolyEdges(youngs_poly_pRight, neighbor_poly_points)
+                        )
+                        if d < min_metric:
+                            print(f"Metric right: {d}")
+                            min_i = i
+                            min_metric = d
+                            did_update = True
+                # If we found one, set neighbor
+                if did_update:
+                    merge_id_with_neighbors.set_left(neighbor_ids[min_i], set_neighbor=True)
+
+                """
+                # This uses a hack: since we processed neighbors in counterclockwise order, this should give the mixed neighbor to the left of the right neighbor
+                # TODO is this neighbor guaranteed to not already have a right neighbor?
                 for i, neighbor_id in enumerate(neighbor_ids):
                     if neighbor_id == right_neighbor_id and not(merge_id_to_obj[neighbor_ids[(i-1) % len(neighbor_ids)]].has_right()):
-                        # This uses a hack: since we processed neighbors in counterclockwise order, this should give the mixed neighbor to the left of the right neighbor
-                        # TODO is this neighbor guaranteed to not already have a right neighbor?
                         merge_id_with_neighbors.set_left(neighbor_ids[(i-1) % len(neighbor_ids)], set_neighbor=True)
                         did_update = True
+                """
+
                 if did_update:
                     doGreedyOrientations()
                     iters_without_progress = 0
@@ -767,6 +863,7 @@ class MergeMesh(BaseMesh):
             merge_id_to_obj[added_merge_id] = added_merge_ids[added_merge_id]
         return list(merge_id_to_obj.keys())
 
+    # Update plt variables to account for merged polys
     def updatePlts(self):
         # Plot variables
         self._plt_patches = []
