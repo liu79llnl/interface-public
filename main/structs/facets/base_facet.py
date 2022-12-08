@@ -243,6 +243,6 @@ class CornerFacet(Facet):
         return CornerFacet(shiftcirclecenterleft, shiftcirclecenterright, shiftcircleradiusleft, shiftcircleradiusright, shiftpLeft, shiftcorner, shiftpRight)
 
     def __str__(self):
-        return "['{}', {}, {}, {}, {}, [{}, {}, {}]]".format('curvedcorner', self.centerLeft, self.centerRight, self.radiusLeft, self.radiusRight, self.pLeft, self.corner, self.pRight)
+        return "['{}', {}, {}, {}, {}, [{}, {}, {}]]".format(self.name, self.centerLeft, self.centerRight, self.radiusLeft, self.radiusRight, self.pLeft, self.corner, self.pRight)
 
     #TODO: define equality for corner?

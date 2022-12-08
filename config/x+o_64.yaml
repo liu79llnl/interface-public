@@ -1,14 +1,14 @@
 TEST:
   FROM_TEMP: false
-  SAVE_NAME: x+o_64
+  SAVE_NAME: x+o_64_l+c
   SETTING: xpluso
 
 MESH:
   GRID_SIZE: 100
-  RESOLUTION: 0.64
+  RESOLUTION: 1.00
 
 GEOMS:
-  FACET_ALGO: circular
+  FACET_ALGO: linear+corner
   THRESHOLD: 1.0e-10
 
 ADVECTION:

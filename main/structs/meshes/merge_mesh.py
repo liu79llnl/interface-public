@@ -1,10 +1,12 @@
 from concurrent.futures import process
+from tkinter import NE
 from main.structs.meshes.base_mesh import BaseMesh
 from main.structs.polys.base_polygon import BasePolygon
 from main.structs.polys.neighbored_polygon import NeighboredPolygon
-from main.geoms.geoms import getDistance, mergePolys, getPolyIntersectArea, getArea, getPolyLineArea
+from main.geoms.geoms import getDistance, mergePolys, getPolyIntersectArea, getArea, getPolyLineArea, lineIntersect
 from main.geoms.circular_facet import getCircleIntersectArea
-from main.structs.facets.base_facet import advectPoint
+from main.geoms.corner_facet import getPolyCornerArea
+from main.structs.facets.base_facet import LinearFacet, advectPoint
 
 from typing import Dict
 import math
@@ -286,6 +288,11 @@ class MergeMesh(BaseMesh):
                                                 polyintersectionarea = getPolyLineArea(polyintersection, advectedfacet.pLeft, advectedfacet.pRight)
                                             elif advectedfacet.name == 'arc':
                                                 polyintersectionarea, _ = getCircleIntersectArea(advectedfacet.center, advectedfacet.radius, polyintersection)
+                                            elif advectedfacet.name == 'corner':
+                                                polyintersectionarea = getPolyCornerArea(polyintersection, advectedfacet.pLeft, advectedfacet.corner, advectedfacet.pRight)
+                                            else:
+                                                print("Unknown facet type in advectMergedFacets")
+                                                raise ValueError(advectedfacet.name)
                                             advected_areas[checkx][checky] += polyintersectionarea #TODO: abs here?
                                             #TODO necessary?
                                             if polyintersectionarea < 0:
@@ -897,8 +904,7 @@ class MergeMesh(BaseMesh):
         self._plt_patchpartialareas = np.array(self._plt_patchpartialareas)
         self._plt_patchinitialareas = np.array(self._plt_patchinitialareas)
 
-#TODO return polys instead and write different functions for only linear vs. only circular vs. corners?
-
+# TODO why are we popping the merge ids that fail?
     def fitFacets(self, merge_ids, setting="circular"):
         if setting == "linear":
             i = 0
@@ -910,7 +916,7 @@ class MergeMesh(BaseMesh):
                 elif merged_poly.has3x3Stencil():
                     merged_poly.runYoungs()
                 else:
-                    print("Skip")
+                    print("Something wrong with facet fitting!")
                     print(self.merged_polys[merge_id])
                     merge_ids.pop(i)
                     i -= 1
@@ -929,12 +935,87 @@ class MergeMesh(BaseMesh):
                 elif merged_poly.has3x3Stencil():
                     merged_poly.runYoungs()
                 else:
+                    print("Something wrong with facet fitting!")
                     merge_ids.pop(i)
                     i -= 1
                 i += 1
 
         elif setting == "linear+corner":
-            pass
+            # First, try fitting linear facets
+            for i in range(len(merge_ids)):
+                merged_poly: NeighboredPolygon = self.merged_polys[merge_ids[i]]
+                if merged_poly.fullyOriented():
+                    if merged_poly.facet_type == "linear":
+                        merged_poly.fitLinearFacet()
+                    else:
+                        merged_poly.fitLinearFacet(doCollinearityCheck=True)
+
+            print("Using corners")
+            # For the ones not fit properly, try a corner
+            for i in range(len(merge_ids)):
+                merge_id = merge_ids[i]
+                merged_poly: NeighboredPolygon = self.merged_polys[merge_id]
+                if not(merged_poly.hasFacet()):
+                    # loop through left until you find a linear facet
+                    doneLeft = False
+                    left: NeighboredPolygon = merged_poly.getLeftNeighbor()
+                    right: NeighboredPolygon = merged_poly.getRightNeighbor()
+                    success = True
+                    while not(doneLeft):
+                        if left == merged_poly or left == right:
+                            doneLeft = True
+                            success = False
+                        elif left.hasFacet() and left.getFacet().name == "linear":
+                            # Linear facet on left
+                            doneLeft = True
+                            success = True
+                        else:
+                            left: NeighboredPolygon = left.getLeftNeighbor()
+                    # Either left = closest neighbor on left with proper linear facet or success = False
+                    doneRight = not(success)
+                    while not(doneRight):
+                        if right == merged_poly or right == left:
+                            doneRight = True
+                            success = False
+                        elif right.hasFacet() and right.getFacet().name == "linear":
+                            # Linear facet on right
+                            doneRight = True
+                            success = True
+                        else:
+                            right: NeighboredPolygon = right.getRightNeighbor()
+                    # If success, left/right are closest neighbors on left/right with proper linear facet
+                    if success:
+                        # Try corner
+                        # print(f"Trying corner with left: {left.getFacet()} and right: {right.getFacet()}")
+                        merged_poly.checkCornerFacet(left.getFacet().pLeft, left.getFacet().pRight, right.getFacet().pRight, right.getFacet().pLeft)
+                        if not(merged_poly.hasFacet()):
+                            # print("Failed to form corner facet")
+                            # print(merged_poly)
+                            pass
+                        else:
+                            pass
+                            # print(merged_poly.getFacet())
+                    else:
+                        # print("Failed to find neighbors")
+                        # print(merged_poly)
+                        pass
+
+            # # For anything left, fit a linear facet again #TODO save computation of linear facet and set it here
+            i = 0
+            while i < len(merge_ids):
+                merge_id = merge_ids[i]
+                merged_poly: NeighboredPolygon = self.merged_polys[merge_id]
+                if not(merged_poly.hasFacet()):
+                    if merged_poly.fullyOriented():
+                        merged_poly.fitLinearFacet()
+                    elif merged_poly.has3x3Stencil():
+                        merged_poly.runYoungs()
+                    else:
+                        print("Something wrong with facet fitting!")
+                        print(self.merged_polys[merge_id])
+                        merge_ids.pop(i)
+                        i -= 1
+                i += 1
 
         elif setting == "circular+corner":
             pass

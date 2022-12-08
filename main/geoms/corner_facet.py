@@ -18,18 +18,18 @@ def getPolyCornerArea(poly, facet1, corner, facet2):
     elif cornerorientationarea > 0:
         #Convex vertex
         cornerintersect = getPolyIntersectArea(poly, cornerpoly)
-        cornerareafraction = getPolyLineArea(poly, newfacet1, newfacet2)
+        cornerarea = getPolyLineArea(poly, newfacet1, newfacet2)
         for cornerintersectpoly in cornerintersect:
-            cornerareafraction += getArea(cornerintersectpoly)
+            cornerarea += getArea(cornerintersectpoly)
     else:
         #Concave vertex
         reversecorner = cornerpoly.copy()
         reversecorner.reverse()
         cornerintersect = getPolyIntersectArea(poly, reversecorner)
-        cornerareafraction = getPolyLineArea(poly, newfacet1, newfacet2)
+        cornerarea = getPolyLineArea(poly, newfacet1, newfacet2)
         for cornerintersectpoly in cornerintersect:
-            cornerareafraction -= getArea(cornerintersectpoly)
-    return cornerareafraction
+            cornerarea -= getArea(cornerintersectpoly)
+    return cornerarea
 
 #Get region to left of line within polygon
 def getPolyLineRegion(poly, l1, l2):
