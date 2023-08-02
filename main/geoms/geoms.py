@@ -38,6 +38,10 @@ def getCentroid(poly):
 def lerp(p1, p2, alpha):
     return [p1[0]*(1-alpha)+p2[0]*alpha, p1[1]*(1-alpha)+p2[1]*alpha]
 
+# Return sine of angle between segments l1 to l2, p1 to p2
+def lineAngleSine(l1, l2, p1, p2):
+    return ((l1[0]-l2[0])*(p1[1]-p2[1])-(l1[1]-l2[1])*(p1[0]-p2[0]))/math.sqrt(((l1[0]-l2[0])**2 + (l1[1]-l2[1])**2)*((p1[0]-p2[0])**2 + (p1[1]-p2[1])**2))
+
 #Returns intersection of segments l1 to l2, p1 to p2, if such an intersection exists
 #Returns: intersect, tl, tp
 def lineIntersect(l1, l2, p1, p2):

@@ -1,11 +1,11 @@
 TEST:
   FROM_TEMP: false
-  SAVE_NAME: zalesak_64_lcorner
+  SAVE_NAME: zalesak_128_lcorner
   SETTING: zalesak
 
 MESH:
   GRID_SIZE: 100
-  RESOLUTION: 0.64
+  RESOLUTION: 1.28
 
 GEOMS:
   FACET_ALGO: linear+corner

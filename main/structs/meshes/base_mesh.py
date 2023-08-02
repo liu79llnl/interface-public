@@ -4,13 +4,11 @@ import os
 import matplotlib.pyplot as plt
 from matplotlib.patches import Polygon as plt_polygon
 from matplotlib.collections import PatchCollection
-import pickle
 
 from main.structs.polys.base_polygon import BasePolygon
 
 class BaseMesh:
 
-    #Parameters that can be accessed publicly: self.polys
     def __init__(self, points, threshold, fractions=None):
         #Points = [[x, y]]
         self._points = points
@@ -48,6 +46,8 @@ class BaseMesh:
             self._plt_patchareas = np.array([])
             self._plt_patchpartialareas = np.array([])
             self._plt_patchinitialareas = np.array([])
+            self._vtk_mixed_polys = []
+            self._vtk_mixed_polyareas = []
         else:
             self.initializeFractions(fractions)
 
@@ -72,6 +72,8 @@ class BaseMesh:
     def setFractions(self, fractions):
         patchareas = []
         patchpartialareas = []
+        self._vtk_mixed_polys = []
+        self._vtk_mixed_polyareas = []
 
         #Flatten array
         for x in range(len(self.polys)):
@@ -82,8 +84,13 @@ class BaseMesh:
                     adjusted_fraction = 1
                 elif abs(adjusted_fraction) < self.threshold:
                     adjusted_fraction = 0
+                else:
+                    # mixed cell
+                    self._vtk_mixed_polys.append(self.polys[x][y].points)
+                    self._vtk_mixed_polyareas.append(adjusted_fraction)
 
                 # self.polys[x][y].setFraction(adjusted_fraction)
+                # Raw (unrounded) area value stored in mesh
                 self.polys[x][y].setFraction(fractions[x][y])
 
                 patchareas.append(adjusted_fraction)
@@ -91,3 +98,56 @@ class BaseMesh:
 
         self._plt_patchareas = np.array(patchareas)
         self._plt_patchpartialareas = np.array(patchpartialareas)
+
+    def getFractions(self):
+        fractions = [[None for _ in range(len(self.polys[0]))] for _ in range(len(self.polys))]
+        for x in range(len(self.polys)):
+            for y in range(len(self.polys[0])):
+                fractions[x][y] = self.polys[x][y].getFraction()
+        return fractions
+
+    # Take cell and return 3x3 array of area fractions (for Young's)
+    def get3x3Stencil(self, x, y):
+        def _helper_in_bounds(i, j):
+            if i < 0 or j < 0 or i >= len(self.polys) or j >= len(self.polys[0]):
+                return None
+            return self.polys[i][j]
+
+        ret = [[None, None, None],[None, None, None],[None, None, None]]
+        for x_delta in range(-1, 2):
+            for y_delta in range(-1, 2):
+                ret[1+x_delta][1+y_delta] = _helper_in_bounds(x+x_delta, y+y_delta)
+
+        return ret
+
+    # Get full/empty cell coords whose fraction is closest to being mixed
+    # If all are mixed, returns [None, None]
+    def getMostMixedAdjacentFullCell(self, x, y):
+        def _helper_diffs(i, j):
+            # Ignore mixed cells
+            if i < 0 or j < 0 or i >= len(self.polys) or j >= len(self.polys[0]) or self.polys[i][j].isMixed():
+                return float("inf")
+            return self.polys[i][j].diffFromMixed()
+        
+        dirs = [[1, 0], [0, 1], [-1, 0], [0, -1]]
+
+        ret_x = None
+        ret_y = None
+        min_diff = float("inf")
+        for dir in dirs:
+            diff = _helper_diffs(x+dir[0], y+dir[1])
+            if diff < min_diff:
+                ret_x = x+dir[0]
+                ret_y = y+dir[1]
+
+        diffs = list(map(lambda dir : _helper_diffs(x+dir[0], y+dir[1]), dirs))
+        print(diffs)
+        return [ret_x, ret_y]
+    
+    def runYoungs(self):
+        for x in range(len(self.polys)):
+            for y in range(len(self.polys[0])):
+                if self.polys[x][y].isMixed():
+                    youngs_poly = self.polys[x][y]
+                    youngs_poly.set3x3Stencil(self.get3x3Stencil(x, y))
+                    youngs_poly.runYoungs()

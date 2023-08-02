@@ -176,7 +176,8 @@ def getCircleCircleIntersects(center1, center2, radius1, radius2):
         return [[chordmidpoint[0]+halfchordlength*(center2[1]-center1[1])/d, chordmidpoint[1]-halfchordlength*(center2[0]-center1[0])/d], [chordmidpoint[0]-halfchordlength*(center2[1]-center1[1])/d, chordmidpoint[1]+halfchordlength*(center2[0]-center1[0])/d]]
 
 #Line l1 to l2
-def getCircleLineIntersects(l1, l2, center, radius):
+#If checkWithinLine, only returns intersects that lie within segment l1 to l2
+def getCircleLineIntersects(l1, l2, center, radius, checkWithinLine=True):
     intersects = []
     a = (l2[0]-l1[0])**2 + (l2[1]-l1[1])**2
     b = 2*((l1[0]-center[0])*(l2[0]-l1[0]) + (l1[1]-center[1])*(l2[1]-l1[1]))
@@ -185,33 +186,16 @@ def getCircleLineIntersects(l1, l2, center, radius):
     disc = b**2 - 4*a*c
     if disc > 0:
         x1 = (-b - math.sqrt(disc))/(2*a)
-        if x1 <= 1 and x1 > 0:
+        if (checkWithinLine and x1 <= 1 and x1 > 0) or not(checkWithinLine):
             inter1 = lerp(l1, l2, x1)
             intersects.append(inter1)
         x2 = (-b + math.sqrt(disc))/(2*a)
-        if x2 < 1 and x2 >= 0:
+        if (checkWithinLine and x2 < 1 and x2 >= 0) or not(checkWithinLine):
             inter2 = lerp(l1, l2, x2)
             intersects.append(inter2)
     return intersects
 
-#Line l1 to l2
-def getCircleLineIntersects2(l1, l2, center, radius):
-    intersects = []
-    a = (l2[0]-l1[0])**2 + (l2[1]-l1[1])**2
-    b = 2*((l1[0]-center[0])*(l2[0]-l1[0]) + (l1[1]-center[1])*(l2[1]-l1[1]))
-    c = (l1[0]-center[0])**2 + (l1[1]-center[1])**2 - radius**2
-    #a is never 0 because p1 != p2
-    disc = b**2 - 4*a*c
-    if disc > 0:
-        x1 = (-b - math.sqrt(disc))/(2*a)
-        inter1 = lerp(l1, l2, x1)
-        intersects.append(inter1)
-        x2 = (-b + math.sqrt(disc))/(2*a)
-        inter2 = lerp(l1, l2, x2)
-        intersects.append(inter2)
-    return intersects
-
-def getCircleIntersectArea(center, radius, poly):
+def getCircleIntersectArea(center, radius, poly): #TODO fix
     #If radius is negative, reverse arcpoints
     if radius < 0:
         complement_area, arcpoints = getCircleIntersectArea(center, -radius, poly)

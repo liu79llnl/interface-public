@@ -1,12 +1,10 @@
-from concurrent.futures import process
-from tkinter import NE
 from main.structs.meshes.base_mesh import BaseMesh
 from main.structs.polys.base_polygon import BasePolygon
 from main.structs.polys.neighbored_polygon import NeighboredPolygon
-from main.geoms.geoms import getDistance, mergePolys, getPolyIntersectArea, getArea, getPolyLineArea, lineIntersect
+from main.geoms.geoms import getDistance, mergePolys, getPolyIntersectArea, getArea, getPolyLineArea, lineIntersect, lerp, pointInPoly
 from main.geoms.circular_facet import getCircleIntersectArea
-from main.geoms.corner_facet import getPolyCornerArea
-from main.structs.facets.base_facet import LinearFacet, advectPoint
+from main.geoms.corner_facet import getPolyCornerArea, getPolyCurvedCornerArea
+from main.structs.facets.base_facet import LinearFacet, ArcFacet, CornerFacet, advectPoint
 
 from typing import Dict
 import math
@@ -114,47 +112,9 @@ class MergeMesh(BaseMesh):
                             neighbor_id = self._get_merge_id(neighbor_coords[0], neighbor_coords[1])
                             self.merge_id_to_neighbor_ids[merge_id].append(neighbor_id)
 
-    # Take cell and return 3x3 array of area fractions (for Young's)
-    def get3x3Stencil(self, x, y):
-        def _helper_in_bounds(i, j):
-            if i < 0 or j < 0 or i >= len(self.polys) or j >= len(self.polys[0]):
-                return 0
-            return self.polys[i][j].getFraction()
-
-        ret = [[0,0,0],[0,0,0],[0,0,0]]
-        for x_delta in range(-1, 2):
-            for y_delta in range(-1, 2):
-                ret[1+x_delta][1+y_delta] = _helper_in_bounds(x+x_delta, y+y_delta)
-
-        return ret
-
-    # Get full/empty cell coords whose fraction is closest to being mixed
-    # If all are mixed, returns [None, None]
-    def getMostMixedAdjacentFullCell(self, x, y):
-        def _helper_diffs(i, j):
-            # Ignore mixed cells
-            if i < 0 or j < 0 or i >= len(self.polys) or j >= len(self.polys[0]) or self.polys[i][j].isMixed():
-                return float("inf")
-            return self.polys[i][j].diffFromMixed()
-        
-        dirs = [[1, 0], [0, 1], [-1, 0], [0, -1]]
-
-        ret_x = None
-        ret_y = None
-        min_diff = float("inf")
-        for dir in dirs:
-            diff = _helper_diffs(x+dir[0], y+dir[1])
-            if diff < min_diff:
-                ret_x = x+dir[0]
-                ret_y = y+dir[1]
-
-        diffs = list(map(lambda dir : _helper_diffs(x+dir[0], y+dir[1]), dirs))
-        print(diffs)
-        return [ret_x, ret_y]
-
-
     #TODO add check for case of diagonal neighbors
     def merge1Neighbors(self):
+        print("Merging 1 neighbors")
         process_queue = []
 
         # Find all 1 neighbors
@@ -225,8 +185,28 @@ class MergeMesh(BaseMesh):
                     merge_coords = self._get_merge_coords(merge_id).copy()
                     self.merged_polys[merge_id] : NeighboredPolygon = self._helper_createMergedPolys(merge_coords)
 
-    def advectMergedFacets(self, velocity, t, dt, checkSize=2):
+    # Runs youngs on all mixed cells. Run setFractions and createMergedPolys before.
+    def runYoungs(self):
+        for x in range(len(self.polys)):
+            for y in range(len(self.polys[0])):
+                if self.polys[x][y].isMixed():
+                    youngs_poly = self.polys[x][y]
+                    youngs_poly.set3x3Stencil(self.get3x3Stencil(x, y))
+                    youngs_facet = youngs_poly.runYoungs(ret=True)
+                    self.merged_polys[self._get_merge_id(x, y)].setFacet(youngs_facet)
 
+    # Runs LVIRA on all mixed cells. Run setFractions and createMergedPolys before.
+    def runLVIRA(self):
+        for x in range(len(self.polys)):
+            for y in range(len(self.polys[0])):
+                if self.polys[x][y].isMixed():
+                    youngs_poly = self.polys[x][y]
+                    youngs_poly.set3x3Stencil(self.get3x3Stencil(x, y))
+                    youngs_facet = youngs_poly.runLVIRA(ret=True)
+                    self.merged_polys[self._get_merge_id(x, y)].setFacet(youngs_facet)
+
+    def advectMergedFacets(self, velocity, t, dt, checkSize=2):
+        print("Advecting facets and recalculating areas")
         advected_areas = [[0] * len(self.polys[0]) for _ in range(len(self.polys))]
         advected_facets = []
         #List to keep track of merge ids such that advected facet has been appended
@@ -284,12 +264,18 @@ class MergeMesh(BaseMesh):
                                             if advect_merge_id not in processed_merge_ids:
                                                 processed_merge_ids.append(advect_merge_id)
                                                 advected_facets.append(advectedfacet)
-                                            if advectedfacet.name == 'linear':
+                                            if isinstance(advectedfacet, LinearFacet):
                                                 polyintersectionarea = getPolyLineArea(polyintersection, advectedfacet.pLeft, advectedfacet.pRight)
-                                            elif advectedfacet.name == 'arc':
+                                            elif isinstance(advectedfacet, ArcFacet):
+                                                # print(polyintersection)
+                                                # print(advectedfacet)
+                                                # polyintersectionarea = advectedfacet.getPolyIntersectArea(polyintersection)
+                                                # print(polyintersectionarea)
                                                 polyintersectionarea, _ = getCircleIntersectArea(advectedfacet.center, advectedfacet.radius, polyintersection)
-                                            elif advectedfacet.name == 'corner':
-                                                polyintersectionarea = getPolyCornerArea(polyintersection, advectedfacet.pLeft, advectedfacet.corner, advectedfacet.pRight)
+                                                # print(polyintersectionarea)
+                                            elif isinstance(advectedfacet, CornerFacet):
+                                                polyintersectionarea = getPolyCurvedCornerArea(polyintersection, advectedfacet.pLeft, advectedfacet.corner, advectedfacet.pRight, advectedfacet.radiusLeft, advectedfacet.radiusRight)
+                                                # polyintersectionarea = getPolyCornerArea(polyintersection, advectedfacet.pLeft, advectedfacet.corner, advectedfacet.pRight)
                                             else:
                                                 print("Unknown facet type in advectMergedFacets")
                                                 raise ValueError(advectedfacet.name)
@@ -654,11 +640,18 @@ class MergeMesh(BaseMesh):
                     print("Weird case 1")
                     # Choose a random mixed neighbor and merge with it
                     neighbor_ids = self._get_neighbor_ids_from_merge_id(merge_id)
-                    neighbor_id = neighbor_ids[0] # TODO make random, or choose the one in the direction most normal to the interface?
-                    new_merge_id_with_neighbors = mergeObjs(merge_id, neighbor_id, use_neighbor_id_orientation=True)
-                    process_queue.append(new_merge_id_with_neighbors.get_merge_id())
-                    doGreedyOrientations()
-                    iters_without_progress = 0
+                    if len(neighbor_ids) > 0:
+                        neighbor_id = neighbor_ids[0] # TODO make random, or choose the one in the direction most normal to the interface?
+                        new_merge_id_with_neighbors = mergeObjs(merge_id, neighbor_id, use_neighbor_id_orientation=True)
+                        # After merging, remove neighbor_id from the process queue if needed
+                        if neighbor_id in process_queue:
+                            process_queue.remove(neighbor_id)
+                        # Add newly merged poly to process queue
+                        process_queue.append(new_merge_id_with_neighbors.get_merge_id())
+                        doGreedyOrientations()
+                        iters_without_progress = 0
+                    # Else, mixed cell originally had no mixed neighbors (typically because true mixed neighbors have fractions below threshold and are rounded to full/empty)
+                    # Construct Young's linear facet. (This case should be handled at the very end.)
                 # Has left neighbor
                 elif merge_id_with_neighbors.has_left():
                     # TODO am I ok to set its right neighbor to itself
@@ -841,7 +834,7 @@ class MergeMesh(BaseMesh):
                 merged_poly.setNeighbor(self.merged_polys[merge_id_with_neighbors.get_right()], "right")
                 # Check if we used hack and had set left/right neighbor to itself to signify dead-end cell with single mixed neighbor
                 if merge_id_with_neighbors.get_left() == merge_id or merge_id_with_neighbors.get_right() == merge_id:
-                    merged_poly.setFacetType("linear")
+                    merged_poly.setFacetType("linear_deadend")
             else:
                 print("Final failed orientations:")
                 print(merge_id_with_neighbors)
@@ -870,13 +863,15 @@ class MergeMesh(BaseMesh):
             merge_id_to_obj[added_merge_id] = added_merge_ids[added_merge_id]
         return list(merge_id_to_obj.keys())
 
-    # Update plt variables to account for merged polys
-    def updatePlts(self):
-        # Plot variables
+    # Update plt and vtk variables to account for merged polys
+    def updatePlots(self):
+        # plt variables
         self._plt_patches = []
         self._plt_patchareas = []
         self._plt_patchpartialareas = []
-        # TODO self._plt_patchinitialareas = []
+        # vtk variables: only plots mixed cells
+        self._vtk_mixed_polys = []
+        self._vtk_mixed_polyareas = []
 
         processed_merge_ids = []
 
@@ -893,12 +888,16 @@ class MergeMesh(BaseMesh):
                     self._plt_patchpartialareas.append(math.ceil(adjusted_fraction - math.floor(adjusted_fraction)))
                 elif merge_id not in processed_merge_ids:
                     # Mixed merged cell
+                    # plt
                     merged_cell = self.merged_polys[merge_id]
                     patch = plt_polygon(np.array(merged_cell.points), True)
                     self._plt_patches.append(patch)
                     adjusted_fraction = merged_cell.getFraction()
                     self._plt_patchareas.append(adjusted_fraction)
                     self._plt_patchpartialareas.append(math.ceil(adjusted_fraction - math.floor(adjusted_fraction)))
+                    # vtk
+                    self._vtk_mixed_polys.append(merged_cell.points)
+                    self._vtk_mixed_polyareas.append(adjusted_fraction)
 
         self._plt_patchareas = np.array(self._plt_patchareas)
         self._plt_patchpartialareas = np.array(self._plt_patchpartialareas)
@@ -928,10 +927,15 @@ class MergeMesh(BaseMesh):
                 merge_id = merge_ids[i]
                 merged_poly: NeighboredPolygon = self.merged_polys[merge_id]
                 if merged_poly.fullyOriented():
-                    if merged_poly.facet_type == "linear":
+                    if merged_poly.facet_type == "linear_deadend":
                         merged_poly.fitLinearFacet()
+                        merged_poly.getFacet().name = "linear_deadend"
                     else:
                         merged_poly.fitCircularFacet()
+                        # If circular facet fitter failed, default to linear
+                        if not(merged_poly.hasFacet()):
+                            merged_poly.fitLinearFacet()
+                            merged_poly.getFacet().name = "default_linear"
                 elif merged_poly.has3x3Stencil():
                     merged_poly.runYoungs()
                 else:
@@ -945,8 +949,11 @@ class MergeMesh(BaseMesh):
             for i in range(len(merge_ids)):
                 merged_poly: NeighboredPolygon = self.merged_polys[merge_ids[i]]
                 if merged_poly.fullyOriented():
-                    if merged_poly.facet_type == "linear":
+                    if merged_poly.facet_type == "linear_deadend":
                         merged_poly.fitLinearFacet()
+                        merged_poly.getFacet().name = "linear_deadend"
+                        print("linear+corner, 1st phase, force linear")
+                        print(merged_poly)
                     else:
                         merged_poly.fitLinearFacet(doCollinearityCheck=True)
 
@@ -962,7 +969,8 @@ class MergeMesh(BaseMesh):
                     right: NeighboredPolygon = merged_poly.getRightNeighbor()
                     success = True
                     while not(doneLeft):
-                        if left == merged_poly or left == right:
+                        # Handle cases: left = itself (hack for when no left neighbor but properly oriented), looped all the way to the beginning, or no left neighbor
+                        if left == merged_poly or left == right or left is None:
                             doneLeft = True
                             success = False
                         elif left.hasFacet() and left.getFacet().name == "linear":
@@ -970,11 +978,16 @@ class MergeMesh(BaseMesh):
                             doneLeft = True
                             success = True
                         else:
-                            left: NeighboredPolygon = left.getLeftNeighbor()
+                            if left.getLeftNeighbor() == left:
+                                # Rare case with dead-end, break
+                                success = False
+                                break
+                            else:
+                                left: NeighboredPolygon = left.getLeftNeighbor()
                     # Either left = closest neighbor on left with proper linear facet or success = False
                     doneRight = not(success)
                     while not(doneRight):
-                        if right == merged_poly or right == left:
+                        if right == merged_poly or right == left or right is None:
                             doneRight = True
                             success = False
                         elif right.hasFacet() and right.getFacet().name == "linear":
@@ -982,7 +995,12 @@ class MergeMesh(BaseMesh):
                             doneRight = True
                             success = True
                         else:
-                            right: NeighboredPolygon = right.getRightNeighbor()
+                            if right.getRightNeighbor() == right:
+                                # Rare case with dead-end, break
+                                success = False
+                                break
+                            else:
+                                right: NeighboredPolygon = right.getRightNeighbor()
                     # If success, left/right are closest neighbors on left/right with proper linear facet
                     if success:
                         # Try corner
@@ -1009,6 +1027,8 @@ class MergeMesh(BaseMesh):
                     if merged_poly.fullyOriented():
                         merged_poly.fitLinearFacet()
                     elif merged_poly.has3x3Stencil():
+                        # print("Youngs on poly")
+                        # print(merged_poly)
                         merged_poly.runYoungs()
                     else:
                         print("Something wrong with facet fitting!")
@@ -1018,10 +1038,237 @@ class MergeMesh(BaseMesh):
                 i += 1
 
         elif setting == "circular+corner":
-            pass
+            # First, try fitting linear facets
+            for i in range(len(merge_ids)):
+                merged_poly: NeighboredPolygon = self.merged_polys[merge_ids[i]]
+                if merged_poly.fullyOriented():
+                    if merged_poly.facet_type == "linear_deadend":
+                        merged_poly.fitLinearFacet()
+                        merged_poly.getFacet().name = "linear_deadend"
+                    else:
+                        merged_poly.fitLinearFacet(doCollinearityCheck=True)
+
+            print("Using corners")
+            # For the ones not fit properly, try a corner
+            for i in range(len(merge_ids)):
+                merge_id = merge_ids[i]
+                merged_poly: NeighboredPolygon = self.merged_polys[merge_id]
+                if not(merged_poly.hasFacet()):
+                    # loop through left until you find a linear facet
+                    doneLeft = False
+                    left: NeighboredPolygon = merged_poly.getLeftNeighbor()
+                    right: NeighboredPolygon = merged_poly.getRightNeighbor()
+                    success = True
+                    while not(doneLeft):
+                        # Handle cases: left = itself (hack for when no left neighbor but properly oriented), looped all the way to the beginning, or no left neighbor
+                        if left == merged_poly or left == right or left is None:
+                            doneLeft = True
+                            success = False
+                        elif left.hasFacet() and left.getFacet().name == "linear":
+                            # Linear facet on left
+                            doneLeft = True
+                            success = True
+                        else:
+                            if left.getLeftNeighbor() == left:
+                                # Rare case with dead-end, break
+                                success = False
+                                break
+                            else:
+                                left: NeighboredPolygon = left.getLeftNeighbor()
+                    # Either left = closest neighbor on left with proper linear facet or success = False
+                    doneRight = not(success)
+                    while not(doneRight):
+                        if right == merged_poly or right == left or right is None:
+                            doneRight = True
+                            success = False
+                        elif right.hasFacet() and right.getFacet().name == "linear":
+                            # Linear facet on right
+                            doneRight = True
+                            success = True
+                        else:
+                            if right.getRightNeighbor() == right:
+                                # Rare case with dead-end, break
+                                success = False
+                                break
+                            else:
+                                right: NeighboredPolygon = right.getRightNeighbor()
+                    # If success, left/right are closest neighbors on left/right with proper linear facet
+                    if success:
+                        # Try corner
+                        # print(f"Trying corner with left: {left.getFacet()} and right: {right.getFacet()}")
+                        merged_poly.checkCornerFacet(left.getFacet().pLeft, left.getFacet().pRight, right.getFacet().pRight, right.getFacet().pLeft)
+                        if not(merged_poly.hasFacet()):
+                            # print("Failed to form corner facet")
+                            # print(merged_poly)
+                            pass
+                        else:
+                            pass
+                            # print(merged_poly.getFacet())
+                    else:
+                        # print("Failed to find neighbors")
+                        # print(merged_poly)
+                        pass
+
+            # Try fitting circular facets
+            i = 0
+            while i < len(merge_ids):
+                merge_id = merge_ids[i]
+                merged_poly: NeighboredPolygon = self.merged_polys[merge_id]
+                if not(merged_poly.hasFacet()):
+                    if merged_poly.fullyOriented():
+                        if merged_poly.facet_type == "linear_deadend":
+                            merged_poly.fitLinearFacet()
+                            merged_poly.getFacet().name = "linear_deadend"
+                        else:
+                            merged_poly.fitCircularFacet()
+                i += 1
+
+            print("Using circular corners")
+            # For the ones not fit properly, try a corner
+            for i in range(len(merge_ids)):
+                merge_id = merge_ids[i]
+                merged_poly: NeighboredPolygon = self.merged_polys[merge_id]
+                # If no facet or curvatures differ by large/small threshold
+                def _helper_checkCurvatureChange(test_poly, checkBig=True):
+                    test_left: NeighboredPolygon = test_poly.getLeftNeighbor()
+                    test_right: NeighboredPolygon = test_poly.getRightNeighbor()
+                    if checkBig:
+                        return test_poly.hasFacet() and test_poly.getFacet().name in ["linear", "arc"] and ((test_left.hasFacet() and test_left.getFacet().name in ["linear", "arc"] and abs(test_left.getFacet().curvature - test_poly.getFacet().curvature) > NeighboredPolygon.curved_corner_curvature_threshold) or not(test_left.hasFacet())) and ((test_right.hasFacet() and test_right.getFacet().name in ["linear", "arc"] and abs(test_right.getFacet().curvature - test_poly.getFacet().curvature) > NeighboredPolygon.curved_corner_curvature_threshold) or not(test_right.hasFacet()))
+                    else:
+                        return test_poly.hasFacet() and test_poly.getFacet().name in ["linear", "arc"] and ((test_left.hasFacet() and test_left.getFacet().name in ["linear", "arc"] and abs(test_left.getFacet().curvature - test_poly.getFacet().curvature) < NeighboredPolygon.curved_corner_curvature_threshold) or not(test_left.hasFacet())) and ((test_right.hasFacet() and test_right.getFacet().name in ["linear", "arc"] and abs(test_right.getFacet().curvature - test_poly.getFacet().curvature) < NeighboredPolygon.curved_corner_curvature_threshold) or not(test_right.hasFacet()))
+                if not(merged_poly.hasFacet()) or _helper_checkCurvatureChange(merged_poly, checkBig=True):
+                    # if _helper_checkCurvatureChange(merged_poly, checkBig=True):
+                    #     print("Potential curved corner:")
+                    #     print(merged_poly)
+                    # loop through left until you find a linear/circular facet
+                    doneLeft = False
+                    left: NeighboredPolygon = merged_poly.getLeftNeighbor()
+                    right: NeighboredPolygon = merged_poly.getRightNeighbor()
+                    success = True
+                    while not(doneLeft):
+                        # Handle cases: left = itself (hack for when no left neighbor but properly oriented), looped all the way to the beginning, or no left neighbor
+                        if left == merged_poly or left == right or left is None:
+                            doneLeft = True
+                            success = False
+                        elif _helper_checkCurvatureChange(left, checkBig=False):
+                            # Linear/circular facet on left
+                            doneLeft = True
+                            success = True
+                        else:
+                            if left.getLeftNeighbor() == left:
+                                # Rare case with dead-end, break
+                                success = False
+                                break
+                            else:
+                                left: NeighboredPolygon = left.getLeftNeighbor()
+                    # Either left = closest neighbor on left with proper linear/circular facet or success = False
+                    doneRight = not(success)
+                    while not(doneRight):
+                        if right == merged_poly or right == left or right is None:
+                            doneRight = True
+                            success = False
+                        elif _helper_checkCurvatureChange(right, checkBig=False):
+                            # Linear/circular facet on right
+                            doneRight = True
+                            success = True
+                        else:
+                            if right.getRightNeighbor() == right:
+                                # Rare case with dead-end, break
+                                success = False
+                                break
+                            else:
+                                right: NeighboredPolygon = right.getRightNeighbor()
+                    # If success, left/right are closest neighbors on left/right with proper linear/circular facet
+                    if success:
+                        # Try all polys between left and right
+                        corner_testing_poly: NeighboredPolygon = left.getRightNeighbor()
+                        corner_area_fraction_errors = []
+                        corner_in_poly = False
+                        while corner_testing_poly != right:
+                            # can cache these. right now each unfit cell is checked once which checks all of its unfit neighbors. TODO fix
+                            corner_facet, corner_area_fraction_error = corner_testing_poly.checkCurvedCornerFacet(left.getFacet(), right.getFacet(), ret=True)
+                            corner_area_fraction_errors.append(corner_area_fraction_error)
+                            if not(corner_in_poly) and corner_facet is not None and pointInPoly(corner_facet.corner, corner_testing_poly.points):
+                                corner_in_poly = True
+                            corner_testing_poly = corner_testing_poly.getRightNeighbor()
+                        # Each poly passes checkCurvedCornerFacet test and corner lies in at least one poly
+                        if None not in corner_area_fraction_errors and corner_in_poly:
+                            # Compute geometric mean of errors #TODO is this the best choice?
+                            corner_area_fraction_error_geomean = 1
+                            for corner_area_fraction_error in corner_area_fraction_errors:
+                                corner_area_fraction_error_geomean *= (corner_area_fraction_error)**(1/len(corner_area_fraction_errors))
+                            if corner_area_fraction_error_geomean < NeighboredPolygon.curved_corner_area_threshold:
+                                corner_testing_poly: NeighboredPolygon = left.getRightNeighbor()
+                                while corner_testing_poly != right:
+                                    corner_testing_poly.setFacet(corner_facet)
+                                    corner_testing_poly = corner_testing_poly.getRightNeighbor()
+                            else:
+                                print(corner_area_fraction_errors)
+                                print(corner_area_fraction_error_geomean)
+                                print("Failed to fit curved corner")
+                        else:
+                            print("Failed to fit curved corners: issue with at least one checkCurvedCornerFacet")
+
+            # For anything left, fit a linear facet
+            i = 0
+            while i < len(merge_ids):
+                merge_id = merge_ids[i]
+                merged_poly: NeighboredPolygon = self.merged_polys[merge_id]
+                if not(merged_poly.hasFacet()):
+                    if merged_poly.fullyOriented():
+                        merged_poly.fitLinearFacet()
+                    elif merged_poly.has3x3Stencil():
+                        merged_poly.runYoungs()
+                    else:
+                        print("Something wrong with facet fitting!")
+                        merge_ids.pop(i)
+                        i -= 1
+                i += 1
 
         elif setting == "extra_corners":
             pass
 
         # Return merge_polys
         return list(map(lambda x : self.merged_polys[x], merge_ids))
+
+    # TODO if gap is too big, don't make C0?
+    def makeC0(self, merged_polys):
+        # If facet name in this list, don't use it for fitting C0
+        fixed_endpoint_facetnames = ["corner"]
+        def _helper_checkValidFacet(poly: NeighboredPolygon):
+            return poly is not None and poly.hasFacet() and poly.facet.name not in fixed_endpoint_facetnames
+        
+        # List of C0 facets matching order of merged_polys, None if merged_poly's facet is not to be C0 adjusted
+        C0_facets = []
+        for i, _ in enumerate(merged_polys):
+            merged_poly: NeighboredPolygon = merged_polys[i]
+            if _helper_checkValidFacet(merged_poly):
+                facet = merged_poly.facet
+                # Left
+                left_neighbor: NeighboredPolygon = merged_poly.getLeftNeighbor()
+                if _helper_checkValidFacet(left_neighbor):
+                    left_pRight = left_neighbor.facet.pRight
+                    C0_pLeft = lerp(facet.pLeft, left_pRight, 0.5)
+                else:
+                    C0_pLeft = facet.pLeft
+                # Right
+                right_neighbor: NeighboredPolygon = merged_poly.getRightNeighbor()
+                if _helper_checkValidFacet(right_neighbor):
+                    right_pLeft = right_neighbor.facet.pLeft
+                    C0_pRight = lerp(facet.pRight, right_pLeft, 0.5)
+                else:
+                    C0_pRight = facet.pRight
+                # Get unique linear/arc facet with endpoints C0_pLeft/Right and whose curvature matches area constraint
+                C0_facet = merged_poly.fitCurvature(C0_pLeft, C0_pRight, ret=True)
+                C0_facets.append(C0_facet)
+            else:
+                C0_facets.append(None)
+
+        # Replace each facet with its C0 adjusted version
+        for i, _ in enumerate(merged_polys):
+            merged_poly: NeighboredPolygon = merged_polys[i]
+            if C0_facets[i] is not None:
+                merged_poly.setFacet(C0_facets[i])
+            # print(merged_poly.facet)
+
+        return merged_polys

@@ -1,11 +1,11 @@
 TEST:
   FROM_TEMP: false
-  SAVE_NAME: vortex_32_circular
-  SETTING: vortex
+  SAVE_NAME: ellipse_merge_noc0
+  SETTING: ellipse_merge
 
 MESH:
   GRID_SIZE: 100
-  RESOLUTION: 0.32
+  RESOLUTION: 1
 
 GEOMS:
   FACET_ALGO: circular
@@ -13,6 +13,4 @@ GEOMS:
   DO_C0: false
 
 ADVECTION:
-  DO_ADVECT: true
-  DT: 0.01
-  T_TOTAL: 2
+  DO_ADVECT: false

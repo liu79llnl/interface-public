@@ -1,6 +1,6 @@
 TEST:
   FROM_TEMP: false
-  SAVE_NAME: zalesak_32
+  SAVE_NAME: zalesak_32_ccorner
   SETTING: zalesak
 
 MESH:
@@ -8,9 +8,11 @@ MESH:
   RESOLUTION: 0.32
 
 GEOMS:
-  FACET_ALGO: circular
+  FACET_ALGO: circular+corner
   THRESHOLD: 1.0e-10
+  DO_C0: false
 
 ADVECTION:
+  DO_ADVECT: true
   DT: 0.01
   T_TOTAL: 2

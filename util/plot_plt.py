@@ -1,5 +1,6 @@
 import os
 import matplotlib.pyplot as plt
+import numpy as np
 from matplotlib.patches import Polygon as plt_polygon
 from matplotlib.collections import PatchCollection
 
@@ -30,4 +31,4 @@ def plotPartialAreas(m: BaseMesh, path):
     plotPolyValues(m, m._plt_patchpartialareas, path)
 
 def plotInitialAreaCompare(m: BaseMesh, path):
-    plotPolyValues(m, m._plt_patchareas - m._plt_patchinitialareas, path)
+    plotPolyValues(m, np.abs(m._plt_patchareas - m._plt_patchinitialareas), path)

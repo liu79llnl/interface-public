@@ -1,6 +1,8 @@
 import math
-from main.geoms.geoms import lerp, pointRightOfLine, pointLeftOfLine, getDistance, getArea
-from main.geoms.circular_facet import getCircumcircle, isMajorArc, getCenter
+from main.geoms.geoms import lerp, pointInPoly, pointRightOfLine, pointLeftOfLine, getDistance, getArea
+from main.geoms.circular_facet import getArcArea, getCircumcircle, isMajorArc, getCenter, getCircleLineIntersects
+
+point_equality_threshold = 1e-13
 
 #Linear facet: ['linear', intersects]
 #Corner facet: ['corner', intersects]
@@ -24,6 +26,7 @@ def advectPoint(p, velocity, t, h, mode='RK4'):
         pfinal = [p[0]+h/6*(v1[0]+2*v2[0]+2*v3[0]+v4[0]), p[1]+h/6*(v1[1]+2*v2[1]+2*v3[1]+v4[1])]
     return pfinal
 
+#TODO move to linear and arc facet classes
 def getNormal(facet, p):
     if facet.name == 'linear':
         if getDistance(facet.pLeft, facet.pRight) == 0: print("getNormal({}, {})".format(facet, p))
@@ -66,9 +69,16 @@ class Facet:
     def advected(self, velocity):
         pass
 
+    def getLeftTangent(self):
+        pass
+
+    def getRightTangent(self):
+        pass
+
 class LinearFacet(Facet):
-    def __init__(self, pLeft, pRight):
-        super().__init__('linear', pLeft, pRight)
+
+    def __init__(self, pLeft, pRight, name='linear'):
+        super().__init__(name, pLeft, pRight)
         self.curvature = 0
         self.midpoint = lerp(self.pLeft, self.pRight, 0.5)
 
@@ -96,6 +106,16 @@ class LinearFacet(Facet):
     def update_endpoints(self, new_pLeft, new_pRight):
         return LinearFacet(new_pLeft, new_pRight)
 
+    def getTangent(self, p):
+        # TODO doesn't check if p is on line
+        return [self.pRight[0]-self.pLeft[0], self.pRight[1]-self.pLeft[1]]
+
+    def getLeftTangent(self):
+        return self.getTangent(self.pLeft)
+
+    def getRightTangent(self):
+        return self.getTangent(self.pRight)
+
     def __str__(self):
         return "['{}', [{}, {}]]".format(self.name, self.pLeft, self.pRight)
 
@@ -105,6 +125,7 @@ class LinearFacet(Facet):
         return False
 
 class ArcFacet(Facet):
+
     def __init__(self, center, radius, pLeft, pRight):
         super().__init__('arc', pLeft, pRight)
         self.center = center
@@ -129,7 +150,7 @@ class ArcFacet(Facet):
         if self.is_major_arc:
             mid = lerp(mid, self.center, 2)
         midconstant = math.sqrt((mid[0]-self.center[0])**2 + (mid[1]-self.center[1])**2)
-        if midconstant < 1e-13:
+        if midconstant < point_equality_threshold:
             #print("Error in facet.py: midconstant = 0")
             vect = [self.center[0]-self.pLeft[0], self.center[1]-self.pLeft[1]]
             mid = [self.center[0] - vect[1], self.center[1] - vect[0]]
@@ -141,11 +162,23 @@ class ArcFacet(Facet):
     def splitInTwo(self):
         return [ArcFacet(self.center, self.radius, self.pLeft, self.midpoint), ArcFacet(self.center, self.radius, self.midpoint, self.pRight)]
 
-    def pointInArcRange(self, p):
+    def pointInArcRange(self, p): # endpoints are in arc range
         if not(self.is_major_arc):
-            return (pointLeftOfLine(p, self.center, self.pLeft) == (self.radius > 0)) and (pointRightOfLine(p, self.center, self.pRight) == (self.radius > 0))
+            return getDistance(p, self.pLeft) < point_equality_threshold or getDistance(p, self.pRight) < point_equality_threshold or ((pointLeftOfLine(p, self.center, self.pLeft) == (self.radius > 0)) and (pointRightOfLine(p, self.center, self.pRight) == (self.radius > 0)))
         else:
-            return not((pointRightOfLine(p, self.center, self.pLeft) == (self.radius > 0)) and (pointLeftOfLine(p, self.center, self.pRight) == (self.radius > 0)))
+            return getDistance(p, self.pLeft) < point_equality_threshold or getDistance(p, self.pRight) < point_equality_threshold or not((pointRightOfLine(p, self.center, self.pLeft) == (self.radius > 0)) and (pointLeftOfLine(p, self.center, self.pRight) == (self.radius > 0)))
+
+    # def getArcFacetPolyIntersectArea(self, poly):
+
+    def getTangent(self, p):
+        # TODO doesn't check if p is on arc
+        return [self.center[1]-p[1], p[0]-self.center[0]]
+
+    def getLeftTangent(self):
+        return self.getTangent(self.pLeft)
+
+    def getRightTangent(self):
+        return self.getTangent(self.pRight)
 
     def advected(self, velocity, t, h, mode='RK4'):
         #Advect by using 3 control points: 2 endpoints + midpoint of arc
@@ -179,6 +212,63 @@ class ArcFacet(Facet):
             self.center = getCenter(new_pLeft, new_pRight, self.radius)
         return ArcFacet(self.center, self.radius, new_pLeft, new_pRight)
 
+    def getPolyIntersectArea(self, poly): #needs to be fixed TODO
+
+        #Hyperparameter
+        adjustcorneramount = 1e-14
+        notmod = True
+        while notmod:
+            startAt = 1
+            foundArc = False
+            intersectpoints = []
+            arcpoints = []
+            for i in range(len(poly)):
+                curpoint = poly[i]
+                nextpoint = poly[(i+1) % len(poly)]
+                curin = getDistance(curpoint, self.center) <= abs(self.radius)
+                intersectpoints.append(curpoint)
+                lineintersects = getCircleLineIntersects(curpoint, nextpoint, self.center, abs(self.radius))
+                for intersect in lineintersects:
+                    if self.pointInArcRange(intersect):
+                        if len(arcpoints) == 0:
+                            if curin:
+                                startAt = 0
+                            else:
+                                # discard current intersectpoints
+                                intersectpoints = []
+                        intersectpoints.append(intersect)
+                        arcpoints.append(intersect)
+            #If not 0 mod 2, circle intersects a corner, perturb poly and rerun
+            if len(arcpoints) % 2 == 1:
+                poly = list(map(lambda x : [x[0]+adjustcorneramount, x[1]+adjustcorneramount], poly))
+            else:
+                notmod = False
+
+        area = 0
+        #Adjust based on startAt
+        if startAt == 1 and len(arcpoints) > 0:
+            arcpoint1 = arcpoints[0]
+            arcpoints.pop(0)
+            arcpoints.append(arcpoint1)
+
+        #Sum arc areas
+        for i in range(0, len(arcpoints), 2):
+            area += getArcArea(arcpoints[i], arcpoints[i+1], self.center, abs(self.radius))
+        area += getArea(intersectpoints)
+        print(intersectpoints)
+        
+        if len(arcpoints) == 0:
+            if pointInPoly(self.center, poly):
+                #circle lies entirely inside poly
+                return self.radius*self.radius*math.pi
+            #circle lies entirely outside poly
+            return 0
+        
+        if self.radius < 0:
+            return getArea(poly) - area
+        else:
+            return area
+
     def __str__(self):
         return "['{}', {}, {}, [{}, {}]]".format(self.name, self.center, self.radius, self.pLeft, self.pRight)
 
@@ -188,6 +278,7 @@ class ArcFacet(Facet):
         return False
 
 class CornerFacet(Facet):
+
     def __init__(self, centerLeft, centerRight, radiusLeft, radiusRight, pLeft, corner, pRight):
         super().__init__('corner', pLeft, pRight)
         self.centerLeft = centerLeft
@@ -196,9 +287,47 @@ class CornerFacet(Facet):
         self.radiusRight = radiusRight
         self.corner = corner
 
+        # Left facet
+        if self.centerLeft is None and self.radiusLeft is None:
+            self.facetLeft = LinearFacet(pLeft=pLeft, pRight=corner)
+        else:
+            self.facetLeft = ArcFacet(center=centerLeft, radius=radiusLeft, pLeft=pLeft, pRight=corner)
+        # Right facet
+        if self.centerRight is None and self.radiusRight is None:
+            self.facetRight = LinearFacet(pLeft=corner, pRight=pRight)
+        else:
+            self.facetRight = ArcFacet(center=centerRight, radius=radiusRight, pLeft=corner, pRight=pRight)
+
     def advected(self, velocity, t, h, mode='RK4'):
         #Advect each side as LinearFacet or ArcFacet
+        # Left facet
+        advectedFacetLeft = self.facetLeft.advected(velocity=velocity, t=t, h=h, mode=mode)
+        if isinstance(advectedFacetLeft, LinearFacet):
+            advectedCenterLeft = None
+            advectedRadiusLeft = None
+        elif isinstance(advectedFacetLeft, ArcFacet):
+            advectedCenterLeft = advectedFacetLeft.center
+            advectedRadiusLeft = advectedFacetLeft.radius
+        else:
+            print("Issue in corner advection: left facet")
+            print(1/0)
+        # Right facet
+        advectedFacetRight = self.facetRight.advected(velocity=velocity, t=t, h=h, mode=mode)
+        if isinstance(advectedFacetRight, LinearFacet):
+            advectedCenterRight = None
+            advectedRadiusRight = None
+        elif isinstance(advectedFacetRight, ArcFacet):
+            advectedCenterRight = advectedFacetRight.center
+            advectedRadiusRight = advectedFacetRight.radius
+        else:
+            print("Issue in corner advection: right facet")
+            print(1/0)
+        
         #Returns CornerFacet
+        assert advectedFacetLeft.pRight == advectedFacetRight.pLeft
+        return CornerFacet(centerLeft=advectedCenterLeft, centerRight=advectedCenterRight, radiusLeft=advectedRadiusLeft, radiusRight=advectedRadiusRight, pLeft=advectedFacetLeft.pLeft, corner=advectedFacetLeft.pRight, pRight=advectedFacetRight.pRight)
+
+        """
         shiftpLeft = advectPoint(self.pLeft, velocity, t, h, mode=mode)
         shiftcorner = advectPoint(self.corner, velocity, t, h, mode=mode)
         shiftpRight = advectPoint(self.pRight, velocity, t, h, mode=mode)
@@ -237,10 +366,23 @@ class CornerFacet(Facet):
         else:
             #Not collinear: treat right edge as arc facet
             if (shiftcirclecenterright[0]-shiftcorner[0])*(-(shiftpRight[1]-shiftcorner[1])) + (shiftcirclecenterright[1]-shiftcorner[1])*(shiftpRight[0]-shiftcorner[0]) < 0:
+                print(f"How right of line is it? {(shiftcirclecenterright[0]-shiftcorner[0])*(-(shiftpRight[1]-shiftcorner[1])) + (shiftcirclecenterright[1]-shiftcorner[1])*(shiftpRight[0]-shiftcorner[0])}")
                 #Circumcenter on right of line, need to invert radius
                 shiftcircleradiusright *= -1
+                print(shiftpLeft)
+                print(shiftcirclecenterright)
+                print(shiftcorner)
+                print(shiftpRight)
+                print(shiftmidright)
 
         return CornerFacet(shiftcirclecenterleft, shiftcirclecenterright, shiftcircleradiusleft, shiftcircleradiusright, shiftpLeft, shiftcorner, shiftpRight)
+        """
+
+    def getLeftTangent(self):
+        return self.facetLeft.getLeftTangent()
+
+    def getRightTangent(self):
+        return self.facetRight.getRightTangent()
 
     def __str__(self):
         return "['{}', {}, {}, {}, {}, [{}, {}, {}]]".format(self.name, self.centerLeft, self.centerRight, self.radiusLeft, self.radiusRight, self.pLeft, self.corner, self.pRight)

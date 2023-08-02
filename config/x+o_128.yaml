@@ -1,6 +1,6 @@
 TEST:
   FROM_TEMP: false
-  SAVE_NAME: x+o_128
+  SAVE_NAME: x+o_128_lcorner
   SETTING: xpluso
 
 MESH:
@@ -8,9 +8,11 @@ MESH:
   RESOLUTION: 1.28
 
 GEOMS:
-  FACET_ALGO: linear
+  FACET_ALGO: linear+corner
   THRESHOLD: 1.0e-10
+  DO_C0: false
 
 ADVECTION:
+  DO_ADVECT: true
   DT: 0.01
   T_TOTAL: 2

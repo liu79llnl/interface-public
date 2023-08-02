@@ -6,7 +6,7 @@ from matplotlib.collections import PatchCollection
 
 from main.geoms.geoms import getDistance, getArea, mergePolys, getPolyIntersectArea, getPolyLineArea, getPolyLineIntersects, lineIntersect, getCentroid
 from main.geoms.linear_facet import getLinearFacet
-from main.geoms.circular_facet import getCircleIntersectArea, getCircleCircleIntersects, getArcFacet, getArcFacetNewton, getCircleLineIntersects2, getCenter
+from main.geoms.circular_facet import getCircleIntersectArea, getCircleCircleIntersects, getArcFacet, getArcFacetNewton, getCenter
 from main.geoms.corner_facet import getPolyCornerArea, getPolyCurvedCornerArea, getCurvedCornerFacet
 from main.structs.polys.base_polygon import BasePolygon
 from main.structs.meshes.base_mesh import BaseMesh
@@ -52,6 +52,21 @@ def initializeEllipse(m: BaseMesh, major_axis, minor_axis, theta, center):
             intersectarea, _ = getCircleIntersectArea([0, 0], 1, squished_opoly)
             areas[x][y] = intersectarea*major_axis*minor_axis
             areas[x][y] /= poly.getMaxArea()
+            if areas[x][y] > 1:
+                print(f"Error in initializeEllipse: {areas[x][y]}")
+                areas[x][y] = 1
+
+    return areas
+
+# Area to left of line from l1 to l2
+def initializeLine(m: BaseMesh, l1, l2):
+    areas = [[0] * len(m.polys[0]) for _ in range(len(m.polys))]
+
+    for x in range(len(areas)):
+        for y in range(len(areas[0])):
+            mesh_poly: BasePolygon = m.polys[x][y]
+            area = getPolyLineArea(mesh_poly.points, l1, l2)
+            areas[x][y] = area / mesh_poly.getMaxArea()
 
     return areas
 
@@ -85,7 +100,7 @@ def zalesak(m: BaseMesh):
     return areas
 
 # x+o example: use with 100x100 grid
-def xpluso(m: BaseMesh):
+def xpluso(m: BaseMesh, dx=0):
     areas = [[0] * len(m.polys[0]) for _ in range(len(m.polys))]
 
     for x in range(len(areas)):
@@ -94,14 +109,14 @@ def xpluso(m: BaseMesh):
 
             #material 1 cross
             xpoints = [[4, 0], [10, 6], [16, 0], [20, 4], [14, 10], [20, 16], [16, 20], [10, 14], [4, 20], [0, 16], [6, 10], [0, 4]]
-            xpoints = list(map(lambda x : [x[0]+3.005, x[1]+3.025], xpoints))
+            xpoints = list(map(lambda x : [x[0]+3.005+dx, x[1]+3.025+dx], xpoints))
             xpolyintersects = getPolyIntersectArea(xpoints, poly.points)
             for xpolyintersect in xpolyintersects:
                 areas[x][y] += abs(getArea(xpolyintersect))
 
             #material 2 cross
             xpoints = [[6, 0], [14, 0], [14, 6], [20, 6], [20, 14], [14, 14], [14, 20], [6, 20], [6, 14], [0, 14], [0, 6], [6, 6]]
-            xpoints = list(map(lambda x : [x[0]+3.005, x[1]+28.025], xpoints))
+            xpoints = list(map(lambda x : [x[0]+3.005+dx, x[1]+28.025+dx], xpoints))
             xpolyintersects = getPolyIntersectArea(xpoints, poly.points)
             for xpolyintersect in xpolyintersects:
                 areas[x][y] += abs(getArea(xpolyintersect))
@@ -109,7 +124,7 @@ def xpluso(m: BaseMesh):
             #material 1 ring
             radius = 10
             radiussmall = 6
-            center = [38.005, 13.005]
+            center = [38.005+dx, 13.005+dx]
             area, _ = getCircleIntersectArea(center, radius, poly.points)
             areas[x][y] += area
             area, _ = getCircleIntersectArea(center, radiussmall, poly.points)
@@ -118,7 +133,7 @@ def xpluso(m: BaseMesh):
             #material 2 ring
             radius = 10
             radiussmall = 6
-            center = [38.005, 38.005]
+            center = [38.005+dx, 38.005+dx]
             area, _ = getCircleIntersectArea(center, radius, poly.points)
             areas[x][y] += area
             area, _ = getCircleIntersectArea(center, radiussmall, poly.points)
@@ -126,7 +141,7 @@ def xpluso(m: BaseMesh):
 
             #material 2 dot
             radius = 3
-            center = [38.005, 13.005]
+            center = [38.005+dx, 13.005+dx]
             area, _ = getCircleIntersectArea(center, radius, poly.points)
             areas[x][y] += area
 
@@ -148,5 +163,9 @@ def initializeAreas(m: BaseMesh, test_setting="vortex"):
         fractions = initializePoly(m, [[1.5, 1.5], [9.5, 11.5], [5.5, 15.2]])
     elif test_setting == "rectangle":
         fractions = initializePoly(m, [[8.2, 8.2], [12.2, 5.2], [15.2, 9.2], [11.2, 12.2]])
+    elif test_setting == "ellipse_merge":
+        fractions = initializeEllipse(m, math.pi, 1.2, math.pi/2, [50.5, 50])
+    elif test_setting == "line":
+        fractions = initializeLine(m, [50.2, 50], [50, 50.35])
 
     return fractions
