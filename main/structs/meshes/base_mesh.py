@@ -144,10 +144,29 @@ class BaseMesh:
         print(diffs)
         return [ret_x, ret_y]
     
+    # Youngs
     def runYoungs(self):
         for x in range(len(self.polys)):
             for y in range(len(self.polys[0])):
                 if self.polys[x][y].isMixed():
-                    youngs_poly = self.polys[x][y]
-                    youngs_poly.set3x3Stencil(self.get3x3Stencil(x, y))
-                    youngs_poly.runYoungs()
+                    mixed_poly = self.polys[x][y]
+                    mixed_poly.set3x3Stencil(self.get3x3Stencil(x, y))
+                    mixed_poly.runYoungs()
+
+    # LVIRA
+    def runLVIRA(self):
+        for x in range(len(self.polys)):
+            for y in range(len(self.polys[0])):
+                if self.polys[x][y].isMixed():
+                    mixed_poly = self.polys[x][y]
+                    mixed_poly.set3x3Stencil(self.get3x3Stencil(x, y))
+                    mixed_poly.runLVIRA()
+
+    # Whenever orientation is unambiguous, run circle fit. Default to Youngs
+    def runSafeCircle(self):
+        for x in range(len(self.polys)):
+            for y in range(len(self.polys[0])):
+                if self.polys[x][y].isMixed():
+                    mixed_poly = self.polys[x][y]
+                    mixed_poly.set3x3Stencil(self.get3x3Stencil(x, y))
+                    mixed_poly.runSafeCircle()

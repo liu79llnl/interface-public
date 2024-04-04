@@ -190,20 +190,30 @@ class MergeMesh(BaseMesh):
         for x in range(len(self.polys)):
             for y in range(len(self.polys[0])):
                 if self.polys[x][y].isMixed():
-                    youngs_poly = self.polys[x][y]
-                    youngs_poly.set3x3Stencil(self.get3x3Stencil(x, y))
-                    youngs_facet = youngs_poly.runYoungs(ret=True)
-                    self.merged_polys[self._get_merge_id(x, y)].setFacet(youngs_facet)
+                    mixed_poly = self.polys[x][y]
+                    mixed_poly.set3x3Stencil(self.get3x3Stencil(x, y))
+                    mixed_facet = mixed_poly.runYoungs(ret=True)
+                    self.merged_polys[self._get_merge_id(x, y)].setFacet(mixed_facet)
 
     # Runs LVIRA on all mixed cells. Run setFractions and createMergedPolys before.
     def runLVIRA(self):
         for x in range(len(self.polys)):
             for y in range(len(self.polys[0])):
                 if self.polys[x][y].isMixed():
-                    youngs_poly = self.polys[x][y]
-                    youngs_poly.set3x3Stencil(self.get3x3Stencil(x, y))
-                    youngs_facet = youngs_poly.runLVIRA(ret=True)
-                    self.merged_polys[self._get_merge_id(x, y)].setFacet(youngs_facet)
+                    mixed_poly = self.polys[x][y]
+                    mixed_poly.set3x3Stencil(self.get3x3Stencil(x, y))
+                    mixed_facet = mixed_poly.runLVIRA(ret=True)
+                    self.merged_polys[self._get_merge_id(x, y)].setFacet(mixed_facet)
+
+    # Runs circles on all mixed cells (default to Youngs). Run setFractions and createMergedPolys before.
+    def runSafeCircle(self):
+        for x in range(len(self.polys)):
+            for y in range(len(self.polys[0])):
+                if self.polys[x][y].isMixed():
+                    mixed_poly = self.polys[x][y]
+                    mixed_poly.set3x3Stencil(self.get3x3Stencil(x, y))
+                    mixed_facet = mixed_poly.runSafeCircle(ret=True)
+                    self.merged_polys[self._get_merge_id(x, y)].setFacet(mixed_facet)
 
     def advectMergedFacets(self, velocity, t, dt, checkSize=2):
         print("Advecting facets and recalculating areas")

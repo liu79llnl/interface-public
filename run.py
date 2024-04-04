@@ -3,7 +3,7 @@ import pickle
 import numpy as np
 
 from main.structs.meshes.merge_mesh import MergeMesh
-from util.config import read_yaml
+from util.config import read_yaml, override_yaml
 from util.initialize_points import makeFineCartesianGrid
 from util.initialize_areas import initializeAreas
 from util.initialize_velocity import initializeVelocity
@@ -11,23 +11,36 @@ from util.initialize_velocity import initializeVelocity
 from util.plot_plt import plotAreas, plotPartialAreas, plotInitialAreaCompare
 from util.plot_vtk import writeMesh, writePartialCells, writeFacets
 from util.util import writeToPickle
-from util.metrics import trueFinalAreas, L2ErrorFractions
+from util.metrics import trueFinalAreas, L2ErrorFractions, LinfErrorFractions
 
-def main(config_setting):
+def main(
+    config_setting,
+    setting=None,
+    resolution=None,
+    facet_algo=None,
+    save_name=None,
+    **kwargs
+):
 
+    # Read config
     config = read_yaml(f"config/{config_setting}.yaml")
+
+    # Make dict of kwargs if not none
+    # kwargs = {k: v for k, v in kwargs.items() if v is not None}
+    # Override config
+    # config = override_yaml(f"config/{config_setting}.yaml", kwargs)
 
     # Test settings
     from_temp = config["TEST"]["FROM_TEMP"]
-    save_name = config["TEST"]["SAVE_NAME"]
-    test_setting = config["TEST"]["SETTING"]
+    save_name = save_name if save_name is not None else config["TEST"]["SAVE_NAME"]
+    test_setting = setting if setting is not None else config["TEST"]["SETTING"]
 
     # Mesh settings
     grid_size = config["MESH"]["GRID_SIZE"]
-    resolution = config["MESH"]["RESOLUTION"]
+    resolution = resolution if resolution is not None else config["MESH"]["RESOLUTION"]
 
     # Area and facet settings
-    facet_algo = config["GEOMS"]["FACET_ALGO"]
+    facet_algo = facet_algo if facet_algo is not None else config["GEOMS"]["FACET_ALGO"]
     threshold = config["GEOMS"]["THRESHOLD"]
     do_c0 = config["GEOMS"]["DO_C0"]
 
@@ -61,7 +74,7 @@ def main(config_setting):
         # Merge and run interface reconstruction
         print("Initial interface reconstruction")
 
-        if facet_algo in ["Youngs", "LVIRA"]:
+        if facet_algo in ["Youngs", "LVIRA", "safe_circle"]:
             m.createMergedPolys()
             plotAreas(m, f"plots/{save_name}/plt/areas/0.png")
             plotPartialAreas(m, f"plots/{save_name}/plt/partial_areas/0.png")
@@ -70,6 +83,8 @@ def main(config_setting):
                 m.runYoungs()
             elif facet_algo == "LVIRA":
                 m.runLVIRA()
+            elif facet_algo == "safe_circle":
+                m.runSafeCircle()
             reconstructed_facets = [p.getFacet() for p in m.merged_polys.values()]
         else:
             m.merge1Neighbors()
@@ -123,13 +138,15 @@ def main(config_setting):
             plotPartialAreas(m, f"plots/{save_name}/plt/partial_areas/{iter}.png")
 
             # Merge and run interface reconstruction
-            if facet_algo in ["Youngs", "LVIRA"]:
+            if facet_algo in ["Youngs", "LVIRA", "safe_circle"]:
                 m.createMergedPolys()
                 writePartialCells(m, f"plots/{save_name}/vtk/reconstructed/mixed_cells/{iter}.vtp")
                 if facet_algo == "Youngs":
                     m.runYoungs()
                 elif facet_algo == "LVIRA":
                     m.runLVIRA()
+                elif facet_algo == "safe_circle":
+                    m.runSafeCircle()
                 reconstructed_facets = [p.getFacet() for p in m.merged_polys.values()]
             else:
                 m.merge1Neighbors()
@@ -151,7 +168,7 @@ def main(config_setting):
             if from_temp:
                 print(1/0)
                 
-            writeToPickle(m, f"plots/{save_name}/temp.pickle", iter)
+            # writeToPickle(m, f"plots/{save_name}/temp.pickle", iter)
 
             t += dt
             # if iter == 11:
@@ -162,12 +179,28 @@ def main(config_setting):
         volume_l2_error, l2_mixed_count = L2ErrorFractions(m.getFractions(), true_final_areas)
         with open(f"plots/{save_name}/volume_l2_error.txt", "w") as f:
             f.write(f"{volume_l2_error}\n{l2_mixed_count}\n")
+        volume_linf_error, _ = LinfErrorFractions(m.getFractions(), true_final_areas)
+        with open(f"plots/{save_name}/volume_linf_error.txt", "w") as f:
+            f.write(f"{volume_linf_error}\n{l2_mixed_count}\n")
         plotInitialAreaCompare(m, f"plots/{save_name}/plt/{iter}_initial_compare.png")
 
 if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="Advection tests.")
-    parser.add_argument("--config", type=str, help="config setting")
+    parser.add_argument("--config", type=str, help="config")
+    # Optional
+    parser.add_argument("--setting", type=str, help="setting", required=False)
+    parser.add_argument("--resolution", type=float, help="resolution", required=False)
+    parser.add_argument("--facet_algo", type=str, help="facet_algo", required=False)
+    parser.add_argument("--save_name", type=str, help="save_name", required=False)
+
+    # Parse
     args = parser.parse_args()
 
-    main(config_setting=args.config)
+    main(
+        config_setting=args.config,
+        setting=args.setting,
+        resolution=args.resolution,
+        facet_algo=args.facet_algo,
+        save_name=args.save_name
+    )

@@ -27,3 +27,14 @@ def L2ErrorFractions(final, true):
                 l2_error += (final[x][y]-true[x][y])**2
                 count += 1
     return l2_error/count, count
+
+def LinfErrorFractions(final, true):
+    assert len(final) == len(true) and len(final[0]) == len(true[0])
+    linf_error = 0
+    count = 0
+    for x in range(len(final)):
+        for y in range(len(final[0])):
+            if (final[x][y] < 1 and final[x][y] > 0) or (true[x][y] < 1 and true[x][y] > 0):
+                linf_error = max(linf_error, abs(final[x][y]-true[x][y]))
+                count += 1
+    return linf_error, count

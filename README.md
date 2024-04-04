@@ -1,10 +1,10 @@
 # Interface reconstruction
 
-Stuff
+An example implementation of an interface reconstruction method, using linear/circular elements and cusps.
 
 ## Contributors
 
-Jerry Liu, weihong01@gmail.com
+Jerry Liu, jwl50@stanford.edu
 
 ## Table of Contents
 
@@ -15,9 +15,5 @@ Jerry Liu, weihong01@gmail.com
 <div align="right"><a href="#table-of-contents">back to top </a></div>
 
 ```bash
-$ python3 stuff
-```
-
-```
-$ python3 stuff
+$ python3 run.py --config ${setting}_${resolution}_${algo}
 ```
