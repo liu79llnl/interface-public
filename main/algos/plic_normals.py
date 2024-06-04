@@ -18,6 +18,8 @@ def getYoungsNormal(stencil):
     f_s = 1/(2+youngs_alpha)*(a(stencil[0][0]) + youngs_alpha*a(stencil[1][0]) + a(stencil[2][0]))
     normal = [(f_e - f_w)/2, (f_n - f_s)/2]
     normal_magnitude = getDistance([0,0], normal)
+    if normal_magnitude < 1e-8:
+        print([[a(stencil[i][j]) for j in range(len(stencil[0]))] for i in range(len(stencil))])
     normal = [normal[0]/normal_magnitude, normal[1]/normal_magnitude]
 
     return normal

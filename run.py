@@ -74,7 +74,7 @@ def main(
         # Merge and run interface reconstruction
         print("Initial interface reconstruction")
 
-        if facet_algo in ["Youngs", "LVIRA", "safe_circle"]:
+        if facet_algo in ["Youngs", "LVIRA", "safe_linear", "safe_circle", "safe_linear_corner"]:
             m.createMergedPolys()
             plotAreas(m, f"plots/{save_name}/plt/areas/0.png")
             plotPartialAreas(m, f"plots/{save_name}/plt/partial_areas/0.png")
@@ -83,8 +83,12 @@ def main(
                 m.runYoungs()
             elif facet_algo == "LVIRA":
                 m.runLVIRA()
+            elif facet_algo == "safe_linear":
+                m.runSafeLinear()
             elif facet_algo == "safe_circle":
                 m.runSafeCircle()
+            elif facet_algo == "safe_linear_corner":
+                m.runSafeLinearCorner()
             reconstructed_facets = [p.getFacet() for p in m.merged_polys.values()]
         else:
             m.merge1Neighbors()
@@ -138,15 +142,19 @@ def main(
             plotPartialAreas(m, f"plots/{save_name}/plt/partial_areas/{iter}.png")
 
             # Merge and run interface reconstruction
-            if facet_algo in ["Youngs", "LVIRA", "safe_circle"]:
+            if facet_algo in ["Youngs", "LVIRA", "safe_linear", "safe_circle", "safe_linear_corner"]:
                 m.createMergedPolys()
                 writePartialCells(m, f"plots/{save_name}/vtk/reconstructed/mixed_cells/{iter}.vtp")
                 if facet_algo == "Youngs":
                     m.runYoungs()
                 elif facet_algo == "LVIRA":
                     m.runLVIRA()
+                elif facet_algo == "safe_linear":
+                    m.runSafeLinear()
                 elif facet_algo == "safe_circle":
                     m.runSafeCircle()
+                elif facet_algo == "safe_linear_corner":
+                    m.runSafeLinearCorner()
                 reconstructed_facets = [p.getFacet() for p in m.merged_polys.values()]
             else:
                 m.merge1Neighbors()
@@ -171,8 +179,8 @@ def main(
             # writeToPickle(m, f"plots/{save_name}/temp.pickle", iter)
 
             t += dt
-            # if iter == 11:
-            #     print(1/0)
+            if iter == 1:
+                print(1/0)
 
         # Compute final metrics
         # Volume errors

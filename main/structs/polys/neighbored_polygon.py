@@ -60,6 +60,16 @@ class NeighboredPolygon(BasePolygon):
 
     def fullyOriented(self):
         return self.hasLeftNeighbor() and self.hasRightNeighbor()
+    
+    # Finds orientation of neighbors based on 3x3 stencil, sets self.left_neighbor and self.right_neighbor for easy cases
+    def findSafeOrientation(self):
+        # Inherit from BasePolygon
+        orientation = super().findSafeOrientation()
+        if orientation is None:
+            return None
+        else:
+            [self.left_neighbor, self.right_neighbor] = orientation
+            return orientation
 
     def fitCircularFacet(self):
         # If both neighbors, try linear and circular TODO

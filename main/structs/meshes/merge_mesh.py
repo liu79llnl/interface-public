@@ -17,6 +17,13 @@ class MergeMesh(BaseMesh):
 
     def __init__(self, points, threshold, areas=None):
         super().__init__(points, threshold, areas)
+        # Let self.polys be a list of NeighboredPolygon objects
+        self.polys: list[list[NeighboredPolygon]] = [[None] * (len(points[0])-1) for _ in range(len(points)-1)]
+        for x in range(len(self.polys)):
+            for y in range(len(self.polys[0])):
+                #Make quads
+                poly = NeighboredPolygon([points[x][y], points[x+1][y], points[x+1][y+1], points[x][y+1]])
+                self.polys[x][y] = poly
 
         # List of merged polys, index in list is used as id.
         # Each element is a list of (x, y)s corresponding to the Cartesian coordinates of the polys to be merged.
@@ -190,7 +197,7 @@ class MergeMesh(BaseMesh):
         for x in range(len(self.polys)):
             for y in range(len(self.polys[0])):
                 if self.polys[x][y].isMixed():
-                    mixed_poly = self.polys[x][y]
+                    mixed_poly : BasePolygon = self.polys[x][y]
                     mixed_poly.set3x3Stencil(self.get3x3Stencil(x, y))
                     mixed_facet = mixed_poly.runYoungs(ret=True)
                     self.merged_polys[self._get_merge_id(x, y)].setFacet(mixed_facet)
@@ -200,9 +207,19 @@ class MergeMesh(BaseMesh):
         for x in range(len(self.polys)):
             for y in range(len(self.polys[0])):
                 if self.polys[x][y].isMixed():
-                    mixed_poly = self.polys[x][y]
+                    mixed_poly : BasePolygon = self.polys[x][y]
                     mixed_poly.set3x3Stencil(self.get3x3Stencil(x, y))
                     mixed_facet = mixed_poly.runLVIRA(ret=True)
+                    self.merged_polys[self._get_merge_id(x, y)].setFacet(mixed_facet)
+
+    # Runs linear on all mixed cells (default to Youngs). Run setFractions and createMergedPolys before.
+    def runSafeLinear(self):
+        for x in range(len(self.polys)):
+            for y in range(len(self.polys[0])):
+                if self.polys[x][y].isMixed():
+                    mixed_poly : BasePolygon = self.polys[x][y]
+                    mixed_poly.set3x3Stencil(self.get3x3Stencil(x, y))
+                    mixed_facet = mixed_poly.runSafeLinear(ret=True)
                     self.merged_polys[self._get_merge_id(x, y)].setFacet(mixed_facet)
 
     # Runs circles on all mixed cells (default to Youngs). Run setFractions and createMergedPolys before.
@@ -210,10 +227,96 @@ class MergeMesh(BaseMesh):
         for x in range(len(self.polys)):
             for y in range(len(self.polys[0])):
                 if self.polys[x][y].isMixed():
-                    mixed_poly = self.polys[x][y]
+                    mixed_poly : BasePolygon = self.polys[x][y]
                     mixed_poly.set3x3Stencil(self.get3x3Stencil(x, y))
                     mixed_facet = mixed_poly.runSafeCircle(ret=True)
                     self.merged_polys[self._get_merge_id(x, y)].setFacet(mixed_facet)
+
+    # 1. Runs linear on all mixed cells
+    # 2. Tries linear corners on all mixed cells
+    # 3. Defaults to Youngs
+    # Run setFractions and createMergedPolys before.
+    def runSafeLinearCorner(self):
+        # 1. Run linear on all mixed cells (implicitly sets neighbors for simple cases)
+        for x in range(len(self.polys)):
+            for y in range(len(self.polys[0])):
+                if self.polys[x][y].isMixed():
+                    mixed_poly : BasePolygon = self.polys[x][y]
+                    mixed_poly.set3x3Stencil(self.get3x3Stencil(x, y))
+                    mixed_facet = mixed_poly.runSafeLinear(ret=True, check_threshold=True, default_to_youngs=False)
+                    print(mixed_facet)
+                    if mixed_facet is not None and mixed_facet.name == "linear":
+                        # Linearity check passed, set facet
+                        self.merged_polys[self._get_merge_id(x, y)].setFacet(mixed_facet)
+        
+        # 2. For mixed cells with left/right neighbors, try linear corners
+        for x in range(len(self.polys)):
+            for y in range(len(self.polys[0])):
+                if self.polys[x][y].isMixed():
+                    mixed_poly : NeighboredPolygon = self.polys[x][y]
+                    if mixed_poly.fullyOriented() and not(mixed_poly.hasFacet()):
+                        # Fully oriented but no linear facet: try linear corners
+                        left : NeighboredPolygon = mixed_poly.getLeftNeighbor()
+                        right : NeighboredPolygon = mixed_poly.getRightNeighbor()
+                        # Loop through left until a linear facet is found
+                        doneLeft = False
+                        success = True
+                        loopcounter = 0
+                        while not(doneLeft) and loopcounter < 50: # TODO
+                            loopcounter += 1
+                            # Handle cases: looped all the way around, or no left neighbor
+                            if left == mixed_poly or left == right or left is None:
+                                doneLeft = True
+                                success = False
+                            elif left.hasFacet() and left.getFacet().name in ["Youngs", "LVIRA", "linear"]:
+                                doneLeft = True
+                                success = True
+                            else:
+                                left: NeighboredPolygon = left.getLeftNeighbor()
+                        if loopcounter >= 50:
+                            success = False
+                        # Either left = closest neighbor on left with linear facet, or success = False
+                        # Loop through right until a linear facet is found
+                        doneRight = not(success)
+                        loopcounter = 0
+                        while not(doneRight) and loopcounter < 50:
+                            loopcounter += 1
+                            # Handle cases: looped all the way around, or no right neighbor
+                            if right == mixed_poly or right == left or right is None:
+                                doneRight = True
+                                success = False
+                            elif right.hasFacet() and right.getFacet().name in ["Youngs", "LVIRA", "linear"]:
+                                doneRight = True
+                                success = True
+                            else:
+                                right: NeighboredPolygon = right.getRightNeighbor()
+                        if loopcounter >= 50:
+                            success = False
+                        # If success, try linear corners
+                        if success:
+                            print(f"Trying linear corner for {mixed_poly.points}")
+                            # Fits linear corner if possible, else no-op
+                            mixed_poly.checkCornerFacet(left.getFacet().pLeft, left.getFacet().pRight, right.getFacet().pRight, right.getFacet().pLeft)
+                            # If successful, set facet
+                            if mixed_poly.hasFacet():
+                                self.merged_polys[self._get_merge_id(x, y)].setFacet(mixed_poly.getFacet())
+
+        # 3. Defaults to Youngs
+        for x in range(len(self.polys)):
+            for y in range(len(self.polys[0])):
+                if self.polys[x][y].isMixed() and not(self.polys[x][y].hasFacet()):
+                    mixed_poly : BasePolygon = self.polys[x][y]
+                    mixed_facet = mixed_poly.runYoungs(ret=True)
+                    self.merged_polys[self._get_merge_id(x, y)].setFacet(mixed_facet)
+
+    # 1. Runs linear on all mixed cells
+    # 2. Tries linear corners on all mixed cells
+    # 3. Runs circular on all mixed cells
+    # 4. Tries circular corners on all mixed cells
+    # 5. Defaults to Youngs
+    # def runSafeCircularCorner(self):
+
+
 
     def advectMergedFacets(self, velocity, t, dt, checkSize=2):
         print("Advecting facets and recalculating areas")

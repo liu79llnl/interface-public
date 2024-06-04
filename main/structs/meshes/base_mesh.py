@@ -149,7 +149,7 @@ class BaseMesh:
         for x in range(len(self.polys)):
             for y in range(len(self.polys[0])):
                 if self.polys[x][y].isMixed():
-                    mixed_poly = self.polys[x][y]
+                    mixed_poly : BasePolygon = self.polys[x][y]
                     mixed_poly.set3x3Stencil(self.get3x3Stencil(x, y))
                     mixed_poly.runYoungs()
 
@@ -158,15 +158,24 @@ class BaseMesh:
         for x in range(len(self.polys)):
             for y in range(len(self.polys[0])):
                 if self.polys[x][y].isMixed():
-                    mixed_poly = self.polys[x][y]
+                    mixed_poly : BasePolygon = self.polys[x][y]
                     mixed_poly.set3x3Stencil(self.get3x3Stencil(x, y))
                     mixed_poly.runLVIRA()
+
+    # Whenever orientation is unambiguous, run linear fit. Default to Youngs
+    def runSafeLinear(self):
+        for x in range(len(self.polys)):
+            for y in range(len(self.polys[0])):
+                if self.polys[x][y].isMixed():
+                    mixed_poly : BasePolygon = self.polys[x][y]
+                    mixed_poly.set3x3Stencil(self.get3x3Stencil(x, y))
+                    mixed_poly.runSafeLinear(check_threshold=False, default_to_youngs=True)
 
     # Whenever orientation is unambiguous, run circle fit. Default to Youngs
     def runSafeCircle(self):
         for x in range(len(self.polys)):
             for y in range(len(self.polys[0])):
                 if self.polys[x][y].isMixed():
-                    mixed_poly = self.polys[x][y]
+                    mixed_poly : BasePolygon = self.polys[x][y]
                     mixed_poly.set3x3Stencil(self.get3x3Stencil(x, y))
                     mixed_poly.runSafeCircle()

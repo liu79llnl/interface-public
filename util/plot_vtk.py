@@ -69,6 +69,8 @@ def writeFacets(facets, path):
     facet_types = vtk.vtkIntArray()
 
     for facet in facets:
+        if facet is None:
+            continue # TODO: Fix this
         if facet.name == "linear" or facet.name == "default_linear" or facet.name == "linear_deadend" or facet.name == "Youngs" or facet.name == "LVIRA":
             line = vtk.vtkLineSource()
             line.SetPoint1(facet.pLeft[0], facet.pLeft[1], 0)

@@ -9,7 +9,7 @@ class BasePolygon:
     fraction_tolerance = 1e-10
     C0_linear_tolerance = 1e-5 # should be a couple orders of magnitude higher than linearity_threshold in NeighboredPolygon
 
-    linearity_threshold = 1e-6 #if area fraction error in linear facet < this value, use linear facet at this cell
+    linearity_threshold = 1e-4 #if area fraction error in linear facet < this value, use linear facet at this cell
     optimization_threshold = 1e-10 # in optimizations
 
     #Invariant: self.fraction should always be between 0 and 1
@@ -89,7 +89,7 @@ class BasePolygon:
         return (self.stencil is not None)
     
     # If orientation is "easy" (only 2 mixed neighbors with consistent orientation), return those neighbors
-    def findOrientation(self):
+    def findSafeOrientation(self):
         assert self.has3x3Stencil()
         dirs = [[1, 0], [0, 1], [-1, 0], [0, -1]]
         def _helper_getNeighborFromDirIndex(dir_i):
@@ -115,12 +115,16 @@ class BasePolygon:
                     return None
             else: # Adjacent
                 # Figure out which mixed neighbor comes first in counterclockwise order
-                if (mixed_dirs[1] - mixed_dirs[0]) % 4 == 1:
-                    mixed1 = mixed_neighbors[0]
-                    mixed2 = mixed_neighbors[1]
-                else:
+                if (mixed_dirs[1] - mixed_dirs[0]) % 4 == 1: # TODO what's going on here? look carefully at orientations for linear vs. circular
+                    # mixed1 = mixed_neighbors[0]
+                    # mixed2 = mixed_neighbors[1]
                     mixed1 = mixed_neighbors[1]
                     mixed2 = mixed_neighbors[0]
+                else:
+                    # mixed1 = mixed_neighbors[1]
+                    # mixed2 = mixed_neighbors[0]
+                    mixed1 = mixed_neighbors[0]
+                    mixed2 = mixed_neighbors[1]
                 # Check if nonmixed neighbors' fractions are consistent
                 nonmixed1 = _helper_getNeighborFromDirIndex((mixed_dirs[0] + 2) % 4)
                 nonmixed2 = _helper_getNeighborFromDirIndex((mixed_dirs[1] + 2) % 4)
@@ -136,8 +140,8 @@ class BasePolygon:
     def runYoungs(self, ret=False):
         assert self.has3x3Stencil()
         normal = getYoungsNormal(self.stencil)
-        facetline1, facetline2 = getLinearFacetFromNormal(self.points, self.getFraction(), normal, BasePolygon.optimization_threshold)
-        intersects = getPolyLineIntersects(self.points, facetline1, facetline2)
+        l1, l2 = getLinearFacetFromNormal(self.points, self.getFraction(), normal, BasePolygon.optimization_threshold)
+        intersects = getPolyLineIntersects(self.points, l1, l2)
         youngsFacet = LinearFacet(intersects[0], intersects[-1], name="Youngs")
         if ret:
             return youngsFacet
@@ -147,31 +151,76 @@ class BasePolygon:
     def runLVIRA(self, ret=False):
         assert self.has3x3Stencil()
         normal = getLVIRANormal(self.stencil)
-        facetline1, facetline2 = getLinearFacetFromNormal(self.points, self.getFraction(), normal, BasePolygon.optimization_threshold)
-        intersects = getPolyLineIntersects(self.points, facetline1, facetline2)
+        l1, l2 = getLinearFacetFromNormal(self.points, self.getFraction(), normal, BasePolygon.optimization_threshold)
+        intersects = getPolyLineIntersects(self.points, l1, l2)
         youngsFacet = LinearFacet(intersects[0], intersects[-1], name="LVIRA")
         if ret:
             return youngsFacet
         else:
             self.setFacet(youngsFacet)
 
+    def runSafeLinear(self, ret=False, check_threshold=False, default_to_youngs=True):
+        assert self.has3x3Stencil()
+        orientation = self.findSafeOrientation()
+        if orientation is None:
+            # Default to Youngs
+            if default_to_youngs:
+                facet = self.runYoungs(ret=True)
+            else:
+                facet = None
+        else:
+            left_neighbor : BasePolygon = orientation[0]
+            right_neighbor : BasePolygon = orientation[1]
+            l1, l2 = getLinearFacet(left_neighbor.points, right_neighbor.points, left_neighbor.getFraction(), right_neighbor.getFraction(), BasePolygon.optimization_threshold)
+            if check_threshold:
+                # Check whether middle area fraction is close to target area fraction
+                if abs(self.getFraction() - getPolyLineArea(self.points, l1, l2)/self.getArea()) < BasePolygon.linearity_threshold and (getPolyLineArea(self.points, l1, l2)/self.getArea() > BasePolygon.fraction_tolerance) and (getPolyLineArea(self.points, l1, l2)/self.getArea() < 1-BasePolygon.fraction_tolerance):
+                    # Linear: set facet
+                    # intersects = getPolyLineIntersects(self.points, l1, l2)
+                    # facet = LinearFacet(intersects[0], intersects[-1])
+                    # Use same slope but refit facet to match area fraction
+                    print(f"Success: {abs(self.getFraction() - getPolyLineArea(self.points, l1, l2)/self.getArea())}")
+                    normal = [(-l2[1]+l1[1])/getDistance(l1, l2), (l2[0]-l1[0])/getDistance(l1, l2)]
+                    l1, l2 = getLinearFacetFromNormal(self.points, self.getFraction(), normal, BasePolygon.optimization_threshold)
+                    intersects = getPolyLineIntersects(self.points, l1, l2)
+                    facet = LinearFacet(intersects[0], intersects[-1], name="linear")
+                else:
+                    print(f"Fail: {abs(self.getFraction() - getPolyLineArea(self.points, l1, l2)/self.getArea())}, {getPolyLineArea(self.points, l1, l2)/self.getArea()}")
+                    if default_to_youngs:
+                        facet = self.runYoungs(ret=True)
+                    else:
+                        facet = None
+            else:
+                # No need to check linearity threshold
+                normal = [(-l2[1]+l1[1])/getDistance(l1, l2), (l2[0]-l1[0])/getDistance(l1, l2)]
+                l1, l2 = getLinearFacetFromNormal(self.points, self.getFraction(), normal, BasePolygon.optimization_threshold)
+                # Linear
+                intersects = getPolyLineIntersects(self.points, l1, l2)
+                facet = LinearFacet(intersects[0], intersects[-1], name="default_linear") # TODO change name to linear?
+
+        if ret:
+            return facet
+        else:
+            if facet is not None:
+                self.setFacet(facet)
+
     def runSafeCircle(self, ret=False):
         assert self.has3x3Stencil()
-        orientation = self.findOrientation()
+        orientation = self.findSafeOrientation()
         if orientation is None:
             # Default to Youngs
             facet = self.runYoungs(ret=True)
         else:
-            self.left_neighbor = orientation[0]
-            self.right_neighbor = orientation[1]
-            facetline1, facetline2 = getLinearFacet(self.left_neighbor.points, self.right_neighbor.points, self.left_neighbor.getFraction(), self.right_neighbor.getFraction(), BasePolygon.optimization_threshold)
-            if abs(self.getFraction() - getPolyLineArea(self.points, facetline1, facetline2)/self.getArea()) < BasePolygon.linearity_threshold and (getPolyLineArea(self.points, facetline1, facetline2)/self.getArea() > BasePolygon.optimization_threshold) and (getPolyLineArea(self.points, facetline1, facetline2)/self.getArea() < 1-BasePolygon.optimization_threshold):
-                intersects = getPolyLineIntersects(self.points, facetline1, facetline2)
+            left_neighbor : BasePolygon = orientation[0]
+            right_neighbor : BasePolygon = orientation[1]
+            l1, l2 = getLinearFacet(left_neighbor.points, right_neighbor.points, left_neighbor.getFraction(), right_neighbor.getFraction(), BasePolygon.optimization_threshold)
+            if abs(self.getFraction() - getPolyLineArea(self.points, l1, l2)/self.getArea()) < BasePolygon.linearity_threshold and (getPolyLineArea(self.points, l1, l2)/self.getArea() > BasePolygon.optimization_threshold) and (getPolyLineArea(self.points, l1, l2)/self.getArea() < 1-BasePolygon.optimization_threshold):
                 # Linear
+                intersects = getPolyLineIntersects(self.points, l1, l2)
                 facet = LinearFacet(intersects[0], intersects[-1])
             else:
                 try:
-                    arccenter, arcradius, arcintersects = getArcFacet(self.left_neighbor.points, self.points, self.right_neighbor.points, self.left_neighbor.getFraction(), self.getFraction(), self.right_neighbor.getFraction(), BasePolygon.optimization_threshold)
+                    arccenter, arcradius, arcintersects = getArcFacet(left_neighbor.points, self.points, right_neighbor.points, left_neighbor.getFraction(), self.getFraction(), right_neighbor.getFraction(), BasePolygon.optimization_threshold)
                     if arccenter is None or arcradius is None or arcintersects is None:
                         facet = self.runYoungs(ret=True)
                     else:
